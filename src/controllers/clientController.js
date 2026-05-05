@@ -87,7 +87,7 @@ const getClientHistory = async (req, res) => {
 
     // Dados do cliente
     const clientRes = await query(
-      `SELECT id, name, cpf, phone, email, created_at FROM clients WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, name, cpf, phone, email, address, number, complement, neighborhood, city, state, zip_code, created_at FROM clients WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     );
     if (!clientRes.rows.length) return res.status(404).json({ error: 'Cliente não encontrado.' });

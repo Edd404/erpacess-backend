@@ -12,23 +12,27 @@ const listClients = async (req, res) => {
     const { page, limit, offset } = paginate(req.query.page, req.query.limit);
     const { search } = req.query;
 
-    let where = 'WHERE deleted_at IS NULL';
+    let where = 'WHERE c.deleted_at IS NULL';
     const params = [];
 
     if (search) {
       const s = `%${search}%`;
-      where += ` AND (name ILIKE $1 OR cpf ILIKE $1 OR phone ILIKE $1 OR email ILIKE $1)`;
+      where += ` AND (c.name ILIKE $1 OR c.cpf ILIKE $1 OR c.phone ILIKE $1 OR c.email ILIKE $1)`;
       params.push(s);
     }
 
-    const countRes = await query(`SELECT COUNT(*) FROM clients ${where}`, params);
+    const countRes = await query(`SELECT COUNT(*) FROM clients c ${where}`, params);
     const total = parseInt(countRes.rows[0].count);
 
     const p = params.length;
     const result = await query(
-      `SELECT id, name, cpf, phone, email, city, state, created_at
-       FROM clients ${where}
-       ORDER BY name ASC
+      `SELECT c.id, c.name, c.cpf, c.phone, c.email, c.city, c.state, c.created_at,
+              COUNT(so.id) FILTER (WHERE so.deleted_at IS NULL) AS total_orders
+       FROM clients c
+       LEFT JOIN service_orders so ON so.client_id = c.id
+       ${where}
+       GROUP BY c.id
+       ORDER BY c.name ASC
        LIMIT $${p + 1} OFFSET $${p + 2}`,
       [...params, limit, offset]
     );

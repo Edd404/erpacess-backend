@@ -11,10 +11,9 @@ const listClients = async (req, res) => {
   try {
     const { page, limit, offset } = paginate(req.query.page, req.query.limit);
     const { search, sort = 'name', order = 'asc' } = req.query;
-
-    const allowedSort = { name:'c.name', city:'c.city', total_orders:'total_orders', created_at:'c.created_at' }
-    const sortCol = allowedSort[sort] || 'c.name'
-    const sortDir = order === 'desc' ? 'DESC' : 'ASC'
+    const allowedSort = { name:'c.name', city:'c.city', total_orders:'total_orders', created_at:'c.created_at' };
+    const sortCol = allowedSort[sort] || 'c.name';
+    const sortDir = order === 'desc' ? 'DESC' : 'ASC';
 
     let where = 'WHERE c.deleted_at IS NULL';
     const params = [];
@@ -31,14 +30,14 @@ const listClients = async (req, res) => {
     const p = params.length;
     const result = await query(
       `SELECT c.id, c.name, c.cpf, c.phone, c.email, c.city, c.state, c.created_at,
-              COUNT(so.id)  FILTER (WHERE so.deleted_at IS NULL) AS total_orders,
+              COUNT(so.id) FILTER (WHERE so.deleted_at IS NULL) AS total_orders,
               MAX(so.created_at) FILTER (WHERE so.deleted_at IS NULL) AS last_order_date
        FROM clients c
        LEFT JOIN service_orders so ON so.client_id = c.id
        ${where}
        GROUP BY c.id
        ORDER BY ${sortCol} ${sortDir}
-       LIMIT $${p + 1} OFFSET $${p + 2}`,
+       LIMIT ${p + 1} OFFSET ${p + 2}`,
       [...params, limit, offset]
     );
 
@@ -96,7 +95,7 @@ const getClientHistory = async (req, res) => {
 
     // Dados do cliente
     const clientRes = await query(
-      `SELECT id, name, cpf, phone, email, address, complement, neighborhood, city, state, cep, created_at FROM clients WHERE id = $1 AND deleted_at IS NULL`,
+      `SELECT id, name, cpf, phone, email, address, complement, neighborhood, city, state, cep, internal_note, created_at FROM clients WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     );
     if (!clientRes.rows.length) return res.status(404).json({ error: 'Cliente não encontrado.' });
@@ -179,14 +178,14 @@ const createClient = async (req, res) => {
 const updateClient = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, phone, email, cep, address, neighborhood, city, state } = req.body;
+    const { name, phone, email, cep, address, complement, neighborhood, city, state, internal_note } = req.body;
 
     const result = await query(
       `UPDATE clients
-       SET name=$1, phone=$2, email=$3, cep=$4, address=$5, neighborhood=$6, city=$7, state=$8, updated_at=NOW()
-       WHERE id=$9 AND deleted_at IS NULL
+       SET name=$1, phone=$2, email=$3, cep=$4, address=$5, complement=$6, neighborhood=$7, city=$8, state=$9, internal_note=$10, updated_at=NOW()
+       WHERE id=$11 AND deleted_at IS NULL
        RETURNING *`,
-      [name, cleanPhone(phone), email||null, cep||null, address||null, neighborhood||null, city||null, state||null, id]
+      [name, cleanPhone(phone), email||null, cep||null, address||null, complement||null, neighborhood||null, city||null, state||null, internal_note||null, id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Cliente não encontrado.' });
     const c = result.rows[0];

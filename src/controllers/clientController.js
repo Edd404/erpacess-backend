@@ -10,7 +10,11 @@ const cleanPhone = (v) => (v || '').replace(/\D/g, '');
 const listClients = async (req, res) => {
   try {
     const { page, limit, offset } = paginate(req.query.page, req.query.limit);
-    const { search } = req.query;
+    const { search, sort = 'name', order = 'asc' } = req.query;
+
+    const allowedSort = { name:'c.name', city:'c.city', total_orders:'total_orders', created_at:'c.created_at' }
+    const sortCol = allowedSort[sort] || 'c.name'
+    const sortDir = order === 'desc' ? 'DESC' : 'ASC'
 
     let where = 'WHERE c.deleted_at IS NULL';
     const params = [];
@@ -27,12 +31,13 @@ const listClients = async (req, res) => {
     const p = params.length;
     const result = await query(
       `SELECT c.id, c.name, c.cpf, c.phone, c.email, c.city, c.state, c.created_at,
-              COUNT(so.id) FILTER (WHERE so.deleted_at IS NULL) AS total_orders
+              COUNT(so.id)  FILTER (WHERE so.deleted_at IS NULL) AS total_orders,
+              MAX(so.created_at) FILTER (WHERE so.deleted_at IS NULL) AS last_order_date
        FROM clients c
        LEFT JOIN service_orders so ON so.client_id = c.id
        ${where}
        GROUP BY c.id
-       ORDER BY c.name ASC
+       ORDER BY ${sortCol} ${sortDir}
        LIMIT $${p + 1} OFFSET $${p + 2}`,
       [...params, limit, offset]
     );

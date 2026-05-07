@@ -215,11 +215,11 @@ const deleteClient = async (req, res) => {
 // ─── CEP LOOKUP ───────────────────────────────────────────────────────────────
 const lookupCEP = async (req, res) => {
   try {
-    const { lookupCEP: cepLookup } = require('../services/cepService');
-    const data = await cepLookup(req.params.cep);
+    const { fetchAddressByCEP } = require('../services/cepService');
+    const data = await fetchAddressByCEP(req.params.cep);
     res.json({ data });
   } catch (err) {
-    res.status(404).json({ error: 'CEP não encontrado.' });
+    res.status(404).json({ error: err.message || 'CEP não encontrado.' });
   }
 };
 

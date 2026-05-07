@@ -37,7 +37,7 @@ const listClients = async (req, res) => {
        ${where}
        GROUP BY c.id
        ORDER BY ${sortCol} ${sortDir}
-       LIMIT ${p + 1} OFFSET ${p + 2}`,
+       LIMIT $${p + 1} OFFSET $${p + 2}`,
       [...params, limit, offset]
     );
 

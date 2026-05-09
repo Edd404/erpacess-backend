@@ -355,6 +355,194 @@ const getStats = async (req, res) => {
 };
 
 /**
+ * GET /api/v1/orders/notifications
+ * Garantias vencendo em 30 dias + ordens paradas há 7+ dias
+ */
+const getNotifications = async (req, res) => {
+  try {
+    const [warranties, stalled] = await Promise.all([
+      query(`
+        SELECT
+          so.id, so.order_number, so.iphone_model,
+          so.warranty_months, so.created_at,
+          c.name AS client_name, c.phone AS client_phone,
+          (so.created_at + (so.warranty_months || ' months')::interval) AS warranty_expires_at,
+          EXTRACT(DAY FROM (
+            (so.created_at + (so.warranty_months || ' months')::interval) - NOW()
+          ))::int AS days_left
+        FROM service_orders so
+        JOIN clients c ON c.id = so.client_id
+        WHERE
+          so.deleted_at IS NULL
+          AND so.status = 'concluido'
+          AND so.warranty_months > 0
+          AND (so.created_at + (so.warranty_months || ' months')::interval) > NOW()
+          AND (so.created_at + (so.warranty_months || ' months')::interval) <= NOW() + INTERVAL '30 days'
+        ORDER BY warranty_expires_at ASC
+        LIMIT 20
+      `),
+      query(`
+        SELECT
+          so.id, so.order_number, so.iphone_model, so.status,
+          so.created_at, so.updated_at,
+          c.name AS client_name, c.phone AS client_phone,
+          EXTRACT(DAY FROM (NOW() - so.updated_at))::int AS stalled_days
+        FROM service_orders so
+        JOIN clients c ON c.id = so.client_id
+        WHERE
+          so.deleted_at IS NULL
+          AND so.status IN ('aberto', 'em_andamento')
+          AND so.updated_at < NOW() - INTERVAL '7 days'
+        ORDER BY so.updated_at ASC
+        LIMIT 20
+      `),
+    ]);
+
+    res.json({
+      data: {
+        warranties_expiring: warranties.rows,
+        stalled_orders:      stalled.rows,
+        total: warranties.rows.length + stalled.rows.length,
+      },
+    });
+  } catch (error) {
+    logger.error('Erro ao buscar notificações:', error);
+    res.status(500).json({ error: 'Erro ao buscar notificações.' });
+  }
+};
+
+/**
+ * GET /api/v1/orders/seller-ranking?period=30
+ * Ranking de vendedores por atendimentos e receita
+ */
+const getSellerRanking = async (req, res) => {
+  try {
+    const { period = '30' } = req.query;
+    const days = Math.min(Math.max(parseInt(period) || 30, 1), 365);
+
+    const result = await query(`
+      SELECT
+        u.id,
+        u.name,
+        u.role,
+        COUNT(so.id)                                               AS total,
+        COUNT(so.id) FILTER (WHERE so.type = 'venda')              AS vendas,
+        COUNT(so.id) FILTER (WHERE so.type = 'manutencao')         AS manutencoes,
+        COUNT(so.id) FILTER (WHERE so.status = 'concluido')        AS concluidos,
+        COALESCE(SUM(so.price), 0)                                 AS receita_total,
+        COALESCE(AVG(so.price), 0)                                 AS ticket_medio,
+        COALESCE(SUM(so.price) FILTER (WHERE so.type = 'venda'), 0) AS receita_vendas,
+        MAX(so.created_at)                                         AS ultimo_atendimento
+      FROM users u
+      LEFT JOIN service_orders so
+        ON so.created_by = u.id
+        AND so.deleted_at IS NULL
+        AND so.created_at >= NOW() - INTERVAL '${days} days'
+      WHERE u.deleted_at IS NULL
+        AND u.role IN ('vendedor', 'gerente', 'admin')
+      GROUP BY u.id, u.name, u.role
+      ORDER BY total DESC, receita_total DESC
+    `);
+
+    res.json({ data: { sellers: result.rows, period_days: days } });
+  } catch (error) {
+    logger.error('Erro ao buscar ranking de vendedores:', error);
+    res.status(500).json({ error: 'Erro ao buscar ranking de vendedores.' });
+  }
+};
+
+/**
+ * GET /api/v1/orders/model-comparison
+ */
+const getModelComparison = async (req, res) => {
+  try {
+    const { start_date, end_date, type = '', limit = '10' } = req.query;
+    const lim = Math.min(Math.max(parseInt(limit) || 10, 1), 50);
+
+    const conditions = ['deleted_at IS NULL', 'iphone_model IS NOT NULL', "iphone_model <> ''"];
+    const params = [];
+    let p = 0;
+
+    if (start_date) { p++; conditions.push(`created_at >= $${p}`); params.push(start_date + 'T00:00:00'); }
+    if (end_date)   { p++; conditions.push(`created_at <= $${p}`); params.push(end_date + 'T23:59:59'); }
+    if (type && ['venda', 'manutencao'].includes(type)) { p++; conditions.push(`type = $${p}`); params.push(type); }
+
+    const where = conditions.join(' AND ');
+    p++;
+
+    const rankingSQL = `
+      SELECT
+        iphone_model,
+        COUNT(*)                                                    AS total,
+        COUNT(*) FILTER (WHERE type = 'venda')                     AS vendas,
+        COUNT(*) FILTER (WHERE type = 'manutencao')                AS manutencoes,
+        COUNT(*) FILTER (WHERE status = 'concluido')               AS concluidos,
+        COUNT(*) FILTER (WHERE status = 'aberto')                  AS abertos,
+        COALESCE(SUM(price), 0)                                    AS receita_total,
+        COALESCE(SUM(price) FILTER (WHERE type = 'venda'), 0)      AS receita_vendas,
+        COALESCE(SUM(price) FILTER (WHERE type = 'manutencao'), 0) AS receita_manutencoes,
+        COALESCE(AVG(price), 0)                                    AS ticket_medio,
+        COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0)      AS ticket_venda,
+        COALESCE(AVG(price) FILTER (WHERE type = 'manutencao'), 0) AS ticket_manutencao,
+        MIN(created_at)                                            AS primeiro_atendimento,
+        MAX(created_at)                                            AS ultimo_atendimento
+      FROM service_orders
+      WHERE ${where}
+      GROUP BY iphone_model
+      ORDER BY total DESC
+      LIMIT $${p}
+    `;
+
+    const totalsSQL = `
+      SELECT
+        COUNT(*)                           AS total_orders,
+        COALESCE(SUM(price), 0)            AS total_revenue,
+        COUNT(DISTINCT iphone_model)       AS distinct_models,
+        COUNT(DISTINCT client_id)          AS unique_clients
+      FROM service_orders
+      WHERE ${where.replace(/\$(\d+)/g, (_, n) => `$${n}`)}
+    `;
+
+    const totalsParams = params.slice(0, -0).filter((_, i) => i < p - 1);
+
+    const [rankingRes, totalsRes] = await Promise.all([
+      query(rankingSQL, [...params, lim]),
+      query(totalsSQL, params),
+    ]);
+
+    const models = rankingRes.rows;
+    const top5   = models.slice(0, 5).map(m => m.iphone_model);
+    let timeline = [];
+
+    if (top5.length > 0) {
+      const placeholders = top5.map((_, i) => `$${i + 1}`).join(', ');
+      const tlParams = [...top5];
+      let tlP = top5.length;
+
+      const tlConditions = [`deleted_at IS NULL`, `iphone_model IN (${placeholders})`];
+      if (start_date) { tlP++; tlConditions.push(`created_at >= $${tlP}`); tlParams.push(start_date + 'T00:00:00'); }
+      if (end_date)   { tlP++; tlConditions.push(`created_at <= $${tlP}`); tlParams.push(end_date + 'T23:59:59'); }
+      if (type && ['venda', 'manutencao'].includes(type)) { tlP++; tlConditions.push(`type = $${tlP}`); tlParams.push(type); }
+
+      const tlRes = await query(`
+        SELECT DATE_TRUNC('day', created_at) AS day, iphone_model,
+               COUNT(*) AS orders, COALESCE(SUM(price), 0) AS revenue
+        FROM service_orders
+        WHERE ${tlConditions.join(' AND ')}
+        GROUP BY DATE_TRUNC('day', created_at), iphone_model
+        ORDER BY day ASC
+      `, tlParams);
+      timeline = tlRes.rows;
+    }
+
+    res.json({ data: { period: { start_date, end_date, type, limit: lim }, totals: totalsRes.rows[0], models, timeline } });
+  } catch (error) {
+    logger.error('Erro ao buscar comparativo de modelos:', error);
+    res.status(500).json({ error: 'Erro ao buscar comparativo de modelos.' });
+  }
+};
+
+/**
  * DELETE /api/v1/orders/:id
  */
 const deleteOrder = async (req, res) => {
@@ -377,4 +565,5 @@ module.exports = {
   listOrders, searchOrders, getOrder, createOrder,
   updateStatus, resendPDF, downloadWarrantyPDF,
   getStats, deleteOrder,
+  getNotifications, getSellerRanking, getModelComparison,
 };

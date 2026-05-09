@@ -419,30 +419,30 @@ const getSellerRanking = async (req, res) => {
   try {
     const { period = '30' } = req.query;
     const days = Math.min(Math.max(parseInt(period) || 30, 1), 365);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
     const result = await query(`
       SELECT
         u.id,
         u.name,
         u.role,
-        COUNT(so.id)                                               AS total,
-        COUNT(so.id) FILTER (WHERE so.type = 'venda')              AS vendas,
-        COUNT(so.id) FILTER (WHERE so.type = 'manutencao')         AS manutencoes,
-        COUNT(so.id) FILTER (WHERE so.status = 'concluido')        AS concluidos,
-        COALESCE(SUM(so.price), 0)                                 AS receita_total,
-        COALESCE(AVG(so.price), 0)                                 AS ticket_medio,
+        COUNT(so.id)                                                AS total,
+        COUNT(so.id) FILTER (WHERE so.type = 'venda')               AS vendas,
+        COUNT(so.id) FILTER (WHERE so.type = 'manutencao')          AS manutencoes,
+        COUNT(so.id) FILTER (WHERE so.status = 'concluido')         AS concluidos,
+        COALESCE(SUM(so.price), 0)                                  AS receita_total,
+        COALESCE(AVG(so.price), 0)                                  AS ticket_medio,
         COALESCE(SUM(so.price) FILTER (WHERE so.type = 'venda'), 0) AS receita_vendas,
-        MAX(so.created_at)                                         AS ultimo_atendimento
+        MAX(so.created_at)                                          AS ultimo_atendimento
       FROM users u
       LEFT JOIN service_orders so
         ON so.created_by = u.id
         AND so.deleted_at IS NULL
-        AND so.created_at >= NOW() - INTERVAL '${days} days'
-      WHERE u.deleted_at IS NULL
-        AND u.role IN ('vendedor', 'gerente', 'admin')
+        AND so.created_at >= $1
+      WHERE u.role IN ('vendedor', 'gerente', 'admin')
       GROUP BY u.id, u.name, u.role
-      ORDER BY total DESC, receita_total DESC
-    `);
+      ORDER BY COUNT(so.id) DESC, COALESCE(SUM(so.price), 0) DESC
+    `, [cutoff]);
 
     res.json({ data: { sellers: result.rows, period_days: days } });
   } catch (error) {

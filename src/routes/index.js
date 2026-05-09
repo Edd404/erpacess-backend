@@ -58,8 +58,11 @@ clientRouter.delete('/:id',      authorize('admin', 'gerente'), clientController
 // ⚠️ Rotas estáticas ANTES de /:id
 const orderRouter = Router();
 orderRouter.use(authenticate);
-orderRouter.get('/stats',            orderController.getStats);          // estática — antes de /:id
-orderRouter.get('/search',           orderController.searchOrders);      // estática — antes de /:id
+orderRouter.get('/stats',            orderController.getStats);             // estática — antes de /:id
+orderRouter.get('/search',           orderController.searchOrders);         // estática — antes de /:id
+orderRouter.get('/notifications',    orderController.getNotifications);     // estática — antes de /:id
+orderRouter.get('/seller-ranking',   orderController.getSellerRanking);     // estática — antes de /:id
+orderRouter.get('/model-comparison', orderController.getModelComparison);   // estática — antes de /:id
 orderRouter.get('/',                 validatePagination, orderController.listOrders);
 orderRouter.get('/:id/warranty-pdf', orderController.downloadWarrantyPDF);
 orderRouter.get('/:id',              orderController.getOrder);

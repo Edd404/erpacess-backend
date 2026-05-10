@@ -118,7 +118,7 @@ const createOrder = async (req, res) => {
   try {
     const {
       client_id, type, iphone_model, capacity, color,
-      imei, price, warranty_months = 3, payment_methods, notes,
+      imei, price, warranty_months = 3, payment_methods, notes, condition_sale,
     } = req.body;
 
     const clientResult = await query(
@@ -141,8 +141,8 @@ const createOrder = async (req, res) => {
       const result = await client_tx.query(
         `INSERT INTO service_orders (
           order_number, client_id, type, iphone_model, capacity,
-          color, imei, price, warranty_months, payment_methods, notes, created_by
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+          color, imei, price, warranty_months, payment_methods, notes, created_by, condition_sale
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         RETURNING *`,
         [
           orderNumber, client_id, type, iphone_model.trim(),
@@ -151,6 +151,7 @@ const createOrder = async (req, res) => {
           parseFloat(price), parseInt(warranty_months),
           JSON.stringify(payment_methods),
           notes?.trim() || null, req.user.id,
+          ['lacrado','seminovo'].includes(condition_sale) ? condition_sale : null,
         ]
       );
       return result.rows[0];
@@ -309,7 +310,9 @@ const getStats = async (req, res) => {
           COUNT(*) FILTER (WHERE status = 'concluido') as completed_orders,
           COALESCE(SUM(price), 0) as total_revenue,
           COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0) as avg_sale_price,
-          COUNT(DISTINCT client_id) as unique_clients
+          COUNT(DISTINCT client_id) as unique_clients,
+          COUNT(*) FILTER (WHERE condition_sale = 'lacrado')  as total_lacrado,
+          COUNT(*) FILTER (WHERE condition_sale = 'seminovo') as total_seminovo
         FROM service_orders
         WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
       `),

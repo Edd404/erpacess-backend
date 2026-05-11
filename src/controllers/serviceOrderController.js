@@ -10,7 +10,9 @@ const logger = require('../utils/logger');
 const listOrders = async (req, res) => {
   try {
     const { page, limit, offset } = paginate(req.query.page, req.query.limit);
-    const { search, type, status, client_id, start_date, end_date } = req.query;
+    const { search, type, status, client_id,
+            start_date, end_date,
+            condition_sale, model } = req.query;
 
     let conditions = ['so.deleted_at IS NULL'];
     const params = [];
@@ -21,11 +23,13 @@ const listOrders = async (req, res) => {
       conditions.push(`(so.order_number ILIKE $${p} OR so.iphone_model ILIKE $${p} OR so.imei ILIKE $${p} OR c.name ILIKE $${p})`);
       params.push(`%${search}%`);
     }
-    if (type)       { p++; conditions.push(`so.type = $${p}`);                     params.push(type); }
-    if (status)     { p++; conditions.push(`so.status = $${p}`);                   params.push(status); }
-    if (client_id)  { p++; conditions.push(`so.client_id = $${p}`);                params.push(client_id); }
-    if (start_date) { p++; conditions.push(`so.created_at >= $${p}`);              params.push(start_date); }
-    if (end_date)   { p++; conditions.push(`so.created_at <= $${p}`);              params.push(end_date + 'T23:59:59'); }
+    if (type)           { p++; conditions.push(`so.type = $${p}`);             params.push(type); }
+    if (status)         { p++; conditions.push(`so.status = $${p}`);           params.push(status); }
+    if (client_id)      { p++; conditions.push(`so.client_id = $${p}`);        params.push(client_id); }
+    if (start_date)     { p++; conditions.push(`so.created_at >= $${p}`);      params.push(start_date); }
+    if (end_date)       { p++; conditions.push(`so.created_at <= $${p}`);      params.push(end_date + 'T23:59:59'); }
+    if (condition_sale) { p++; conditions.push(`so.condition_sale = $${p}`);   params.push(condition_sale); }
+    if (model)          { p++; conditions.push(`so.iphone_model ILIKE $${p}`); params.push(`%${model}%`); }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
 

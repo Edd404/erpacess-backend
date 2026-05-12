@@ -316,8 +316,12 @@ const getStats = async (req, res) => {
           COALESCE(SUM(price), 0) as total_revenue,
           COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0) as avg_sale_price,
           COUNT(DISTINCT client_id) as unique_clients,
-          COUNT(*) FILTER (WHERE condition_sale = 'lacrado')  as total_lacrado,
-          COUNT(*) FILTER (WHERE condition_sale = 'seminovo') as total_seminovo
+          COUNT(*) FILTER (WHERE condition_sale = 'lacrado')                    as total_lacrado,
+          COUNT(*) FILTER (WHERE condition_sale = 'seminovo')                   as total_seminovo,
+          COALESCE(SUM(price) FILTER (WHERE condition_sale = 'lacrado'),  0)    as revenue_lacrado,
+          COALESCE(SUM(price) FILTER (WHERE condition_sale = 'seminovo'), 0)    as revenue_seminovo,
+          COALESCE(AVG(price) FILTER (WHERE condition_sale = 'lacrado'),  0)    as avg_lacrado,
+          COALESCE(AVG(price) FILTER (WHERE condition_sale = 'seminovo'), 0)    as avg_seminovo
         FROM service_orders
         WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
       `),

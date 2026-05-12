@@ -29,7 +29,7 @@ const listOrders = async (req, res) => {
     if (start_date)     { p++; conditions.push(`so.created_at >= $${p}`);      params.push(start_date); }
     if (end_date)       { p++; conditions.push(`so.created_at <= $${p}`);      params.push(end_date + 'T23:59:59'); }
     if (condition_sale) { p++; conditions.push(`so.condition_sale = $${p}`);   params.push(condition_sale); }
-    if (model)          { p++; conditions.push(`so.iphone_model ILIKE $${p}`); params.push(`%${model}%`); }
+    if (model)          { p++; conditions.push(`so.iphone_model = $${p}`);      params.push(model); }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
 

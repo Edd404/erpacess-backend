@@ -305,7 +305,7 @@ const getStats = async (req, res) => {
     const { period = '30' } = req.query;
     const days = parseInt(period);
 
-    const [totals, byType, byStatus, recentRevenue, topModels] = await Promise.all([
+    const [totals, prevTotals, byType, byStatus, recentRevenue, topModels] = await Promise.all([
       query(`
         SELECT
           COUNT(*) as total_orders,
@@ -324,6 +324,20 @@ const getStats = async (req, res) => {
           COALESCE(AVG(price) FILTER (WHERE condition_sale = 'seminovo'), 0)    as avg_seminovo
         FROM service_orders
         WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
+      `),
+      // Período anterior para comparação de tendência
+      query(`
+        SELECT
+          COUNT(*) as total_orders,
+          COUNT(*) FILTER (WHERE type = 'venda') as total_sales,
+          COUNT(*) FILTER (WHERE type = 'manutencao') as total_maintenance,
+          COALESCE(SUM(price), 0) as total_revenue,
+          COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0) as avg_sale_price,
+          COUNT(DISTINCT client_id) as unique_clients
+        FROM service_orders
+        WHERE deleted_at IS NULL
+          AND created_at >= NOW() - INTERVAL '${days * 2} days'
+          AND created_at <  NOW() - INTERVAL '${days} days'
       `),
       query(`
         SELECT type, COUNT(*) as count, COALESCE(SUM(price), 0) as revenue
@@ -350,9 +364,28 @@ const getStats = async (req, res) => {
       `),
     ]);
 
+    // Calcula variações % vs período anterior
+    const curr = totals.rows[0];
+    const prev = prevTotals.rows[0];
+    const calcTrend = (c, p) => {
+      const cv = parseFloat(c) || 0;
+      const pv = parseFloat(p) || 0;
+      if (pv === 0) return cv > 0 ? 100 : 0;
+      return Math.round(((cv - pv) / pv) * 100);
+    };
+    const trends = {
+      revenue:        calcTrend(curr.total_revenue,  prev.total_revenue),
+      avg_sale_price: calcTrend(curr.avg_sale_price, prev.avg_sale_price),
+      total_orders:   calcTrend(curr.total_orders,   prev.total_orders),
+      unique_clients: calcTrend(curr.unique_clients, prev.unique_clients),
+      total_sales:    calcTrend(curr.total_sales,    prev.total_sales),
+    };
+
     res.json({
       data: {
-        summary: totals.rows[0],
+        summary: curr,
+        previous_summary: prev,
+        trends,
         by_type: byType.rows,
         by_status: byStatus.rows,
         revenue_timeline: recentRevenue.rows,

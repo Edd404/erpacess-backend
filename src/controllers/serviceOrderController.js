@@ -611,4 +611,63 @@ module.exports = {
   updateStatus, resendPDF, downloadWarrantyPDF,
   getStats, deleteOrder,
   getNotifications, getSellerRanking, getModelComparison,
+  saveDocument, removeDocument,
+};
+
+/**
+ * PATCH /api/v1/orders/:id/document
+ * Salva a URL do documento assinado (enviado pelo Cloudinary direto do frontend)
+ * Body: { url: string, public_id: string }
+ */
+const saveDocument = async (req, res) => {
+  try {
+    const { url, public_id } = req.body;
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return res.status(422).json({ error: 'URL inválida.' });
+    }
+
+    const result = await query(
+      `UPDATE service_orders
+       SET signed_document_url       = $1,
+           signed_document_public_id = $2,
+           signed_document_at        = NOW(),
+           updated_at                = NOW()
+       WHERE id = $3 AND deleted_at IS NULL
+       RETURNING id, order_number, signed_document_url, signed_document_at`,
+      [url, public_id || null, req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
+
+    logger.info(`Documento anexado à ordem ${result.rows[0].order_number} por ${req.user.id}`);
+    res.json({ message: 'Documento salvo com sucesso.', data: result.rows[0] });
+  } catch (error) {
+    logger.error('Erro ao salvar documento:', error);
+    res.status(500).json({ error: 'Erro ao salvar documento.' });
+  }
+};
+
+/**
+ * DELETE /api/v1/orders/:id/document
+ * Remove a referência do documento (não apaga do Cloudinary — pode fazer isso no painel deles)
+ */
+const removeDocument = async (req, res) => {
+  try {
+    const result = await query(
+      `UPDATE service_orders
+       SET signed_document_url       = NULL,
+           signed_document_public_id = NULL,
+           signed_document_at        = NULL,
+           updated_at                = NOW()
+       WHERE id = $1 AND deleted_at IS NULL
+       RETURNING id, order_number`,
+      [req.params.id]
+    );
+    if (!result.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
+
+    logger.info(`Documento removido da ordem ${result.rows[0].order_number} por ${req.user.id}`);
+    res.json({ message: 'Documento removido.' });
+  } catch (error) {
+    logger.error('Erro ao remover documento:', error);
+    res.status(500).json({ error: 'Erro ao remover documento.' });
+  }
 };

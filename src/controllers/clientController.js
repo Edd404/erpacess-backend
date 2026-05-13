@@ -104,13 +104,15 @@ const getClientHistory = async (req, res) => {
     // Todas as ordens
     const ordersRes = await query(
       `SELECT id, order_number, type, status, iphone_model, capacity, color,
-              imei, price, payment_methods, warranty_months, notes, condition_sale, created_at
+              imei, price, payment_methods, warranty_months, notes, condition_sale,
+              signed_document_url, signed_document_at,
+              created_at
        FROM service_orders
        WHERE client_id = $1 AND deleted_at IS NULL
        ORDER BY created_at DESC`,
       [id]
     );
-    const orders = ordersRes.rows;
+    const orders = ordersRes.rows.map(o => ({ ...o, client_name: client.name }));
 
     // Métricas derivadas
     const totalSpent      = orders.reduce((s, o) => s + parseFloat(o.price || 0), 0);

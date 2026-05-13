@@ -606,14 +606,6 @@ const deleteOrder = async (req, res) => {
   }
 };
 
-module.exports = {
-  listOrders, searchOrders, getOrder, createOrder,
-  updateStatus, resendPDF, downloadWarrantyPDF,
-  getStats, deleteOrder,
-  getNotifications, getSellerRanking, getModelComparison,
-  saveDocument, removeDocument,
-};
-
 /**
  * PATCH /api/v1/orders/:id/document
  * Salva a URL do documento assinado (enviado pelo Cloudinary direto do frontend)
@@ -670,4 +662,12 @@ const removeDocument = async (req, res) => {
     logger.error('Erro ao remover documento:', error);
     res.status(500).json({ error: 'Erro ao remover documento.' });
   }
+};
+
+module.exports = {
+  listOrders, searchOrders, getOrder, createOrder,
+  updateStatus, resendPDF, downloadWarrantyPDF,
+  getStats, deleteOrder,
+  getNotifications, getSellerRanking, getModelComparison,
+  saveDocument, removeDocument,
 };

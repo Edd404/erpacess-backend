@@ -42,12 +42,11 @@ authRouter.get('/me',                authenticate, authController.getMe);
 authRouter.patch('/change-password', authenticate, authController.changePassword);
 
 // ── CLIENTS ───────────────────────────────────────────────────
-// ⚠️ Rotas estáticas ANTES de /:id
 const clientRouter = Router();
 clientRouter.use(authenticate);
 clientRouter.get('/',            validatePagination, clientController.listClients);
-clientRouter.get('/search',      clientController.searchClients);       // estática — antes de /:id
-clientRouter.get('/cep/:cep',    clientController.lookupCEP);           // estática — antes de /:id
+clientRouter.get('/search',      clientController.searchClients);
+clientRouter.get('/cep/:cep',    clientController.lookupCEP);
 clientRouter.get('/:id/history', clientController.getClientHistory);
 clientRouter.get('/:id',         clientController.getClient);
 clientRouter.post('/',           validateCreateClient, clientController.createClient);
@@ -55,20 +54,24 @@ clientRouter.put('/:id',         validateUpdateClient, clientController.updateCl
 clientRouter.delete('/:id',      authorize('admin', 'gerente'), clientController.deleteClient);
 
 // ── ORDERS ────────────────────────────────────────────────────
-// ⚠️ Rotas estáticas ANTES de /:id
 const orderRouter = Router();
 orderRouter.use(authenticate);
-orderRouter.get('/stats',            orderController.getStats);             // estática — antes de /:id
-orderRouter.get('/search',           orderController.searchOrders);         // estática — antes de /:id
-orderRouter.get('/notifications',    orderController.getNotifications);     // estática — antes de /:id
-orderRouter.get('/seller-ranking',   orderController.getSellerRanking);     // estática — antes de /:id
-orderRouter.get('/model-comparison', orderController.getModelComparison);   // estática — antes de /:id
+// ⚠️ rotas estáticas ANTES de /:id
+orderRouter.get('/stats',            orderController.getStats);
+orderRouter.get('/search',           orderController.searchOrders);
+orderRouter.get('/notifications',    orderController.getNotifications);
+orderRouter.get('/seller-ranking',   orderController.getSellerRanking);
+orderRouter.get('/model-comparison', orderController.getModelComparison);
 orderRouter.get('/',                 validatePagination, orderController.listOrders);
 orderRouter.get('/:id/warranty-pdf', orderController.downloadWarrantyPDF);
 orderRouter.get('/:id',              orderController.getOrder);
 orderRouter.post('/',                validateCreateServiceOrder, orderController.createOrder);
 orderRouter.patch('/:id/status',     orderController.updateStatus);
 orderRouter.patch('/:id/resend-pdf', authorize('admin', 'gerente'), orderController.resendPDF);
+// ── Documento assinado (Cloudinary) ───────────────────────────
+orderRouter.patch('/:id/document',   orderController.saveDocument);
+orderRouter.delete('/:id/document',  orderController.removeDocument);
+// ─────────────────────────────────────────────────────────────
 orderRouter.delete('/:id',           authorize('admin'), orderController.deleteOrder);
 
 // ── MONTA ─────────────────────────────────────────────────────

@@ -70,7 +70,13 @@ const validateCreateClient = [
 
   body('phone')
     .notEmpty().withMessage('Telefone é obrigatório.')
-    .matches(/^\(?\d{2}\)?\s?9?\d{4}-?\d{4}$/).withMessage('Telefone inválido. Use o formato (11) 99999-9999.'),
+    .custom(value => {
+      const digits = String(value).replace(/\D/g, '')
+      if (digits.length < 10 || digits.length > 11) {
+        throw new Error('Telefone inválido. Use o formato (11) 99999-9999.')
+      }
+      return true
+    }),
 
   body('email')
     .optional({ nullable: true, checkFalsy: true })

@@ -99,7 +99,34 @@ const validateCreateClient = [
 
 const validateUpdateClient = [
   param('id').isUUID().withMessage('ID de cliente inválido.'),
-  ...validateCreateClient.slice(0, -1), // Reutiliza regras sem o handler
+  body('name')
+    .trim()
+    .notEmpty().withMessage('Nome completo é obrigatório.')
+    .isLength({ min: 3, max: 150 }).withMessage('Nome deve ter entre 3 e 150 caracteres.'),
+  body('phone')
+    .notEmpty().withMessage('Telefone é obrigatório.')
+    .custom(value => {
+      const digits = String(value).replace(/\D/g, '')
+      if (digits.length < 10 || digits.length > 11) {
+        throw new Error('Telefone inválido. Use o formato (11) 99999-9999.')
+      }
+      return true
+    }),
+  body('email')
+    .optional({ nullable: true, checkFalsy: true })
+    .isEmail().withMessage('E-mail inválido.')
+    .normalizeEmail(),
+  body('cep')
+    .optional({ nullable: true, checkFalsy: true })
+    .matches(/^\d{5}-?\d{3}$/).withMessage('CEP inválido.'),
+  body('address').optional({ nullable: true }),
+  body('complement').optional({ nullable: true }),
+  body('neighborhood').optional({ nullable: true }),
+  body('city').optional({ nullable: true }),
+  body('state')
+    .optional({ nullable: true, checkFalsy: true })
+    .isLength({ min: 2, max: 2 }).withMessage('Estado deve ter 2 caracteres (UF).'),
+  body('internal_note').optional({ nullable: true }),
   handleValidationErrors,
 ];
 

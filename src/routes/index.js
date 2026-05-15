@@ -9,6 +9,7 @@ const {
   validateCreateClient,
   validateUpdateClient,
   validateCreateServiceOrder,
+  validateUpdateServiceOrder,
   validatePagination,
 } = require('../middleware/validation');
 
@@ -66,6 +67,7 @@ orderRouter.get('/',                 validatePagination, orderController.listOrd
 orderRouter.get('/:id/warranty-pdf', orderController.downloadWarrantyPDF);
 orderRouter.get('/:id',              orderController.getOrder);
 orderRouter.post('/',                validateCreateServiceOrder, orderController.createOrder);
+orderRouter.put('/:id',              validateUpdateServiceOrder, orderController.updateOrder);
 orderRouter.patch('/:id/status',     orderController.updateStatus);
 orderRouter.patch('/:id/resend-pdf', authorize('admin', 'gerente'), orderController.resendPDF);
 // ── Documento assinado (Cloudinary) ───────────────────────────

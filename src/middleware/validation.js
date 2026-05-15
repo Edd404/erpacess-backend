@@ -184,6 +184,68 @@ const validateCreateServiceOrder = [
   handleValidationErrors,
 ];
 
+/**
+ * Validator para atualização de ordem (PUT /orders/:id)
+ * Todos os campos são opcionais, mas se fornecidos são validados.
+ */
+const validateUpdateServiceOrder = [
+  param('id').isUUID().withMessage('ID de ordem inválido.'),
+
+  body('type')
+    .optional()
+    .isIn(['venda', 'manutencao']).withMessage('Tipo deve ser "venda" ou "manutencao".'),
+
+  body('iphone_model')
+    .optional()
+    .notEmpty().withMessage('Modelo não pode ser vazio.')
+    .isLength({ max: 100 }),
+
+  body('capacity')
+    .optional({ nullable: true })
+    .isIn(['64GB', '128GB', '256GB', '512GB', '1TB', '']).withMessage('Capacidade inválida.'),
+
+  body('color')
+    .optional({ nullable: true })
+    .isLength({ max: 50 }),
+
+  body('imei')
+    .optional({ nullable: true, checkFalsy: true })
+    .custom((value) => {
+      if (value && !validateIMEI(value)) throw new Error('IMEI inválido (deve ter 15 dígitos e passar no algoritmo de Luhn).');
+      return true;
+    }),
+
+  body('price')
+    .optional()
+    .isFloat({ min: 0 }).withMessage('Valor deve ser um número positivo.')
+    .toFloat(),
+
+  body('warranty_months')
+    .optional({ nullable: true })
+    .isInt({ min: 0, max: 60 }).withMessage('Garantia deve ser entre 0 e 60 meses.')
+    .toInt(),
+
+  body('payment_methods')
+    .optional()
+    .isArray({ min: 1 }).withMessage('Selecione ao menos uma forma de pagamento.')
+    .custom((methods) => {
+      const valid = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'iphone_entrada'];
+      const invalid = methods.filter((m) => !valid.includes(m));
+      if (invalid.length) throw new Error(`Forma(s) de pagamento inválida(s): ${invalid.join(', ')}`);
+      return true;
+    }),
+
+  body('notes')
+    .optional({ nullable: true })
+    .isLength({ max: 2000 }).withMessage('Observações devem ter no máximo 2000 caracteres.'),
+
+  body('condition_sale')
+    .optional({ nullable: true })
+    .isIn(['lacrado', 'seminovo', '']).withMessage('Condição deve ser "lacrado" ou "seminovo".'),
+
+  handleValidationErrors,
+];
+
 // ───────────────────────────────────────────────────────────────
 // VALIDATORS DE QUERY (paginação e filtros)
 // ───────────────────────────────────────────────────────────────
@@ -203,6 +265,7 @@ module.exports = {
   validateCreateClient,
   validateUpdateClient,
   validateCreateServiceOrder,
+  validateUpdateServiceOrder,
   validatePagination,
   handleValidationErrors,
 };

@@ -518,19 +518,22 @@ const getModelComparison = async (req, res) => {
     const rankingSQL = `
       SELECT
         iphone_model,
-        COUNT(*)                                                    AS total,
-        COUNT(*) FILTER (WHERE type = 'venda')                     AS vendas,
-        COUNT(*) FILTER (WHERE type = 'manutencao')                AS manutencoes,
-        COUNT(*) FILTER (WHERE status = 'concluido')               AS concluidos,
-        COUNT(*) FILTER (WHERE status = 'aberto')                  AS abertos,
-        COALESCE(SUM(price), 0)                                    AS receita_total,
-        COALESCE(SUM(price) FILTER (WHERE type = 'venda'), 0)      AS receita_vendas,
-        COALESCE(SUM(price) FILTER (WHERE type = 'manutencao'), 0) AS receita_manutencoes,
-        COALESCE(AVG(price), 0)                                    AS ticket_medio,
-        COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0)      AS ticket_venda,
-        COALESCE(AVG(price) FILTER (WHERE type = 'manutencao'), 0) AS ticket_manutencao,
-        MIN(created_at)                                            AS primeiro_atendimento,
-        MAX(created_at)                                            AS ultimo_atendimento
+        COUNT(*)                                                          AS total,
+        COUNT(*) FILTER (WHERE type = 'venda')                           AS vendas,
+        COUNT(*) FILTER (WHERE type = 'manutencao')                      AS manutencoes,
+        COUNT(*) FILTER (WHERE condition_sale = 'lacrado')               AS lacrados,
+        COUNT(*) FILTER (WHERE condition_sale = 'seminovo')              AS seminovos,
+        COUNT(*) FILTER (WHERE condition_sale IS NULL AND type='venda')  AS sem_condicao,
+        COALESCE(SUM(price), 0)                                          AS receita_total,
+        COALESCE(SUM(price) FILTER (WHERE type = 'venda'), 0)            AS receita_vendas,
+        COALESCE(SUM(price) FILTER (WHERE type = 'manutencao'), 0)       AS receita_manutencoes,
+        COALESCE(SUM(price) FILTER (WHERE condition_sale = 'lacrado'), 0)  AS receita_lacrado,
+        COALESCE(SUM(price) FILTER (WHERE condition_sale = 'seminovo'), 0) AS receita_seminovo,
+        COALESCE(AVG(price), 0)                                          AS ticket_medio,
+        COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0)            AS ticket_venda,
+        COALESCE(AVG(price) FILTER (WHERE type = 'manutencao'), 0)       AS ticket_manutencao,
+        MIN(created_at)                                                  AS primeiro_atendimento,
+        MAX(created_at)                                                  AS ultimo_atendimento
       FROM service_orders
       WHERE ${where}
       GROUP BY iphone_model
@@ -584,64 +587,6 @@ const getModelComparison = async (req, res) => {
   } catch (error) {
     logger.error('Erro ao buscar comparativo de modelos:', error);
     res.status(500).json({ error: 'Erro ao buscar comparativo de modelos.' });
-  }
-};
-
-/**
- * PUT /api/v1/orders/:id
- * Edição completa de uma ordem existente.
- * Campos imutáveis: order_number, client_id, created_by, created_at, signed_document_*
- */
-const updateOrder = async (req, res) => {
-  try {
-    const {
-      type, iphone_model, capacity, color,
-      imei, price, warranty_months, payment_methods,
-      notes, condition_sale,
-    } = req.body;
-
-    // Verifica se a ordem existe
-    const existing = await query(
-      'SELECT id, order_number, type FROM service_orders WHERE id = $1 AND deleted_at IS NULL',
-      [req.params.id]
-    );
-    if (!existing.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
-
-    const result = await query(
-      `UPDATE service_orders SET
-        type             = COALESCE($1,  type),
-        iphone_model     = COALESCE($2,  iphone_model),
-        capacity         = $3,
-        color            = $4,
-        imei             = $5,
-        price            = COALESCE($6,  price),
-        warranty_months  = COALESCE($7,  warranty_months),
-        payment_methods  = COALESCE($8,  payment_methods),
-        notes            = $9,
-        condition_sale   = $10,
-        updated_at       = NOW()
-       WHERE id = $11 AND deleted_at IS NULL
-       RETURNING *`,
-      [
-        type || null,
-        iphone_model?.trim() || null,
-        capacity       || null,
-        color?.trim()  || null,
-        imei?.replace(/\D/g, '') || null,
-        price != null  ? parseFloat(price) : null,
-        warranty_months != null ? parseInt(warranty_months) : null,
-        payment_methods ? JSON.stringify(payment_methods) : null,
-        notes?.trim()  ?? null,
-        ['lacrado','seminovo'].includes(condition_sale) ? condition_sale : null,
-        req.params.id,
-      ]
-    );
-
-    logger.info(`Ordem ${existing.rows[0].order_number} editada por ${req.user.id}`);
-    res.json({ message: 'Ordem atualizada com sucesso.', data: result.rows[0] });
-  } catch (error) {
-    logger.error('Erro ao atualizar ordem:', error);
-    res.status(500).json({ error: 'Erro ao atualizar ordem de serviço.' });
   }
 };
 
@@ -723,7 +668,7 @@ const removeDocument = async (req, res) => {
 };
 
 module.exports = {
-  listOrders, searchOrders, getOrder, createOrder, updateOrder,
+  listOrders, searchOrders, getOrder, createOrder,
   updateStatus, resendPDF, downloadWarrantyPDF,
   getStats, deleteOrder,
   getNotifications, getSellerRanking, getModelComparison,

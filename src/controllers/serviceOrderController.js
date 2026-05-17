@@ -591,6 +591,62 @@ const getModelComparison = async (req, res) => {
 };
 
 /**
+ * PUT /api/v1/orders/:id
+ * Edição de ordem existente — campos imutáveis: order_number, client_id, created_by, signed_document_*
+ */
+const updateOrder = async (req, res) => {
+  try {
+    const {
+      type, iphone_model, capacity, color,
+      imei, price, warranty_months, payment_methods,
+      notes, condition_sale,
+    } = req.body;
+
+    const existing = await query(
+      'SELECT id, order_number FROM service_orders WHERE id = $1 AND deleted_at IS NULL',
+      [req.params.id]
+    );
+    if (!existing.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
+
+    const result = await query(
+      `UPDATE service_orders SET
+        type             = COALESCE($1,  type),
+        iphone_model     = COALESCE($2,  iphone_model),
+        capacity         = $3,
+        color            = $4,
+        imei             = $5,
+        price            = COALESCE($6,  price),
+        warranty_months  = COALESCE($7,  warranty_months),
+        payment_methods  = COALESCE($8,  payment_methods),
+        notes            = $9,
+        condition_sale   = $10,
+        updated_at       = NOW()
+       WHERE id = $11 AND deleted_at IS NULL
+       RETURNING *`,
+      [
+        type || null,
+        iphone_model?.trim() || null,
+        capacity       || null,
+        color?.trim()  || null,
+        imei?.replace(/\D/g, '') || null,
+        price != null  ? parseFloat(price) : null,
+        warranty_months != null ? parseInt(warranty_months) : null,
+        payment_methods ? JSON.stringify(payment_methods) : null,
+        notes?.trim()  ?? null,
+        ['lacrado','seminovo'].includes(condition_sale) ? condition_sale : null,
+        req.params.id,
+      ]
+    );
+
+    logger.info(`Ordem ${existing.rows[0].order_number} editada por ${req.user.id}`);
+    res.json({ message: 'Ordem atualizada com sucesso.', data: result.rows[0] });
+  } catch (error) {
+    logger.error('Erro ao atualizar ordem:', error);
+    res.status(500).json({ error: 'Erro ao atualizar ordem de serviço.' });
+  }
+};
+
+/**
  * DELETE /api/v1/orders/:id
  */
 const deleteOrder = async (req, res) => {
@@ -668,7 +724,7 @@ const removeDocument = async (req, res) => {
 };
 
 module.exports = {
-  listOrders, searchOrders, getOrder, createOrder,
+  listOrders, searchOrders, getOrder, createOrder, updateOrder,
   updateStatus, resendPDF, downloadWarrantyPDF,
   getStats, deleteOrder,
   getNotifications, getSellerRanking, getModelComparison,

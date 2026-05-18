@@ -77,6 +77,11 @@ orderRouter.delete('/:id/document',  orderController.removeDocument);
 // ─────────────────────────────────────────────────────────────
 orderRouter.delete('/:id',           authorize('admin'), orderController.deleteOrder);
 
+// ── MODELS (público para autenticados) ───────────────────────
+const modelsRouter = Router();
+modelsRouter.use(authenticate);
+modelsRouter.get('/active', adminController.listActiveModels);
+
 // ── ADMIN ─────────────────────────────────────────────────────
 const adminRouter = Router();
 adminRouter.use(authenticate, authorize('admin'));
@@ -95,6 +100,7 @@ adminRouter.patch('/models/:id',            adminController.updateModel);
 router.use('/auth',    authRouter);
 router.use('/clients', clientRouter);
 router.use('/orders',  orderRouter);
+router.use('/models',  modelsRouter);
 router.use('/admin',   adminRouter);
 
 module.exports = router;

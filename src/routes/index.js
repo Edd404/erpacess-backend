@@ -2,6 +2,7 @@ const { Router } = require('express');
 const authController   = require('../controllers/authController');
 const clientController = require('../controllers/clientController');
 const orderController  = require('../controllers/serviceOrderController');
+const adminController  = require('../controllers/adminController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter }  = require('../middleware/security');
 const {
@@ -76,9 +77,24 @@ orderRouter.delete('/:id/document',  orderController.removeDocument);
 // ─────────────────────────────────────────────────────────────
 orderRouter.delete('/:id',           authorize('admin'), orderController.deleteOrder);
 
+// ── ADMIN ─────────────────────────────────────────────────────
+const adminRouter = Router();
+adminRouter.use(authenticate, authorize('admin'));
+// Usuários
+adminRouter.get('/users',                   adminController.listUsers);
+adminRouter.post('/users',                  adminController.createUser);
+adminRouter.patch('/users/:id',             adminController.updateUser);
+adminRouter.patch('/users/:id/reset-password', adminController.resetPassword);
+// Modelos de iPhone
+adminRouter.get('/models',                  adminController.listModels);
+adminRouter.get('/models/active',           adminController.listActiveModels);
+adminRouter.post('/models',                 adminController.createModel);
+adminRouter.patch('/models/:id',            adminController.updateModel);
+
 // ── MONTA ─────────────────────────────────────────────────────
 router.use('/auth',    authRouter);
 router.use('/clients', clientRouter);
 router.use('/orders',  orderRouter);
+router.use('/admin',   adminRouter);
 
 module.exports = router;

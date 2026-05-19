@@ -518,23 +518,25 @@ const getModelComparison = async (req, res) => {
     const rankingSQL = `
       SELECT
         iphone_model,
-        COUNT(*)                                                    AS total,
-        COUNT(*) FILTER (WHERE type = 'venda')                     AS vendas,
-        COUNT(*) FILTER (WHERE type = 'manutencao')                AS manutencoes,
-        COUNT(*) FILTER (WHERE status = 'concluido')               AS concluidos,
-        COUNT(*) FILTER (WHERE status = 'aberto')                  AS abertos,
-        COALESCE(SUM(price), 0)                                    AS receita_total,
-        COALESCE(SUM(price) FILTER (WHERE type = 'venda'), 0)      AS receita_vendas,
-        COALESCE(SUM(price) FILTER (WHERE type = 'manutencao'), 0) AS receita_manutencoes,
-        COALESCE(AVG(price), 0)                                    AS ticket_medio,
-        COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0)      AS ticket_venda,
-        COALESCE(AVG(price) FILTER (WHERE type = 'manutencao'), 0) AS ticket_manutencao,
-        MIN(created_at)                                            AS primeiro_atendimento,
-        MAX(created_at)                                            AS ultimo_atendimento
+        COUNT(*)                                                          AS total,
+        COUNT(*) FILTER (WHERE type = 'venda')                           AS vendas,
+        COUNT(*) FILTER (WHERE type = 'manutencao')                      AS manutencoes,
+        COUNT(*) FILTER (WHERE condition_sale = 'lacrado')               AS lacrados,
+        COUNT(*) FILTER (WHERE condition_sale = 'seminovo')              AS seminovos,
+        COALESCE(SUM(price), 0)                                          AS receita_total,
+        COALESCE(SUM(price) FILTER (WHERE type = 'venda'), 0)            AS receita_vendas,
+        COALESCE(SUM(price) FILTER (WHERE type = 'manutencao'), 0)       AS receita_manutencoes,
+        COALESCE(SUM(price) FILTER (WHERE condition_sale = 'lacrado'), 0)  AS receita_lacrado,
+        COALESCE(SUM(price) FILTER (WHERE condition_sale = 'seminovo'), 0) AS receita_seminovo,
+        COALESCE(AVG(price), 0)                                          AS ticket_medio,
+        COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0)            AS ticket_venda,
+        COALESCE(AVG(price) FILTER (WHERE type = 'manutencao'), 0)       AS ticket_manutencao,
+        MIN(created_at)                                                  AS primeiro_atendimento,
+        MAX(created_at)                                                  AS ultimo_atendimento
       FROM service_orders
       WHERE ${where}
       GROUP BY iphone_model
-      ORDER BY total DESC
+      ORDER BY receita_total DESC, total DESC
       LIMIT $${p}
     `;
 

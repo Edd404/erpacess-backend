@@ -305,7 +305,7 @@ const getStats = async (req, res) => {
     const { period = '30' } = req.query;
     const days = parseInt(period);
 
-    const [totals, prevTotals, byType, byStatus, recentRevenue, topModels] = await Promise.all([
+    const [totals, prevTotals, byType, byStatus, recentRevenue, topModels, byLeadSource] = await Promise.all([
       query(`
         SELECT
           COUNT(*) as total_orders,
@@ -362,6 +362,23 @@ const getStats = async (req, res) => {
         WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
         GROUP BY iphone_model ORDER BY count DESC LIMIT 5
       `),
+      // Origem dos clientes (extraída das notes)
+      query(`
+        SELECT
+          CASE
+            WHEN notes ILIKE '%Origem: Instagram/Indicação%' OR notes ILIKE '%Origem: Instagram/Indicacao%' THEN 'Instagram/Indicação'
+            WHEN notes ILIKE '%Origem: Já é cliente%'       OR notes ILIKE '%Origem: Ja e cliente%'        THEN 'Já é cliente'
+            ELSE 'Não informado'
+          END AS origem,
+          COUNT(*) as total,
+          COALESCE(SUM(price), 0) as receita
+        FROM service_orders
+        WHERE deleted_at IS NULL
+          AND created_at >= NOW() - INTERVAL '${days} days'
+          AND type = 'venda'
+        GROUP BY origem
+        ORDER BY total DESC
+      `),
     ]);
 
     // Calcula variações % vs período anterior
@@ -390,6 +407,7 @@ const getStats = async (req, res) => {
         by_status: byStatus.rows,
         revenue_timeline: recentRevenue.rows,
         top_models: topModels.rows,
+        by_lead_source: byLeadSource.rows,
         period_days: days,
       },
     });

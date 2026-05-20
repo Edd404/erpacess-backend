@@ -43,7 +43,7 @@ const listOrders = async (req, res) => {
       `SELECT so.id, so.order_number, so.type, so.status,
               so.iphone_model, so.capacity, so.color, so.imei,
               so.price, so.warranty_months, so.payment_methods,
-              so.condition_sale,
+              so.condition_sale, so.notes,
               so.created_at, so.updated_at,
               c.id as client_id, c.name as client_name,
               c.phone as client_phone, c.email as client_email

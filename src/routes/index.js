@@ -70,7 +70,7 @@ orderRouter.get('/:id',              orderController.getOrder);
 orderRouter.post('/',                validateCreateServiceOrder, orderController.createOrder);
 orderRouter.put('/:id',              validateUpdateServiceOrder, orderController.updateOrder);
 orderRouter.patch('/:id/status',     orderController.updateStatus);
-orderRouter.patch('/:id/resend-pdf', authorize('admin', 'gerente'), orderController.resendPDF);
+orderRouter.patch('/:id/resend-pdf', orderController.resendPDF);
 // ── Documento assinado (Cloudinary) ───────────────────────────
 orderRouter.patch('/:id/document',   orderController.saveDocument);
 orderRouter.delete('/:id/document',  orderController.removeDocument);

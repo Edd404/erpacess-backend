@@ -135,6 +135,10 @@ const startServer = async () => {
     const { verifyEmailConnection } = require('./services/emailService');
     await verifyEmailConnection();
 
+    // Inicia cron de backup diário às 03:00
+    const { startBackupCron } = require('./services/backupService');
+    startBackupCron();
+
     const server = app.listen(PORT, () => {
       logger.info(`🚀 iPhone Store API rodando na porta ${PORT}`);
       logger.info(`   Ambiente: ${process.env.NODE_ENV || 'development'}`);

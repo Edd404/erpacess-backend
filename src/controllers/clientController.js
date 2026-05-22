@@ -1,6 +1,7 @@
 const { query } = require('../config/database');
 const { paginate, formatCPF } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const cleanCPF  = (v) => (v || '').replace(/\D/g, '');
@@ -112,7 +113,7 @@ const getClientHistory = async (req, res) => {
        ORDER BY created_at DESC`,
       [id]
     );
-    const orders = ordersRes.rows.map(o => ({ ...o, client_name: client.name }));
+    const orders = ordersRes.rows.map(o => attachSignedDocumentUrl({ ...o, client_name: client.name }));
 
     // Métricas derivadas
     const totalSpent      = orders.reduce((s, o) => s + parseFloat(o.price || 0), 0);

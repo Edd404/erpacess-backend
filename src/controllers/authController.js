@@ -3,6 +3,18 @@ const { query } = require('../config/database');
 const { generateAccessToken, generateRefreshToken } = require('../middleware/auth');
 const logger = require('../utils/logger');
 
+// ── Blocklist in-memory de refresh tokens revogados ───────────
+// Armazena { token: expiry_timestamp }. Limpo automaticamente a cada hora.
+const revokedTokens = new Map();
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, exp] of revokedTokens) {
+    if (exp < now) revokedTokens.delete(token);
+  }
+}, 60 * 60 * 1000);
+
+const isRevoked = (token) => revokedTokens.has(token);
+
 /**
  * POST /api/v1/auth/login
  */
@@ -93,6 +105,11 @@ const refreshToken = async (req, res) => {
   const { refreshToken: token } = req.body;
   if (!token) return res.status(400).json({ error: 'Refresh token não fornecido.' });
 
+  // Rejeita tokens revogados (logout)
+  if (isRevoked(token)) {
+    return res.status(401).json({ error: 'Token revogado. Faça login novamente.', code: 'TOKEN_REVOKED' });
+  }
+
   try {
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
@@ -158,4 +175,18 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { login, register, refreshToken, getMe, changePassword };
+/**
+ * POST /api/v1/auth/logout
+ * Revoga o refresh token do cliente — impede renovação de sessão.
+ */
+const logout = (req, res) => {
+  const { refreshToken: token } = req.body;
+  if (token) {
+    // Mantém na blocklist por 7 dias (vida máxima do refresh token)
+    revokedTokens.set(token, Date.now() + 7 * 24 * 60 * 60 * 1000);
+    logger.info(`Logout: refresh token revogado para usuário ${req.user?.id || 'desconhecido'}`);
+  }
+  res.json({ message: 'Logout realizado com sucesso.' });
+};
+
+module.exports = { login, register, refreshToken, getMe, changePassword, logout };

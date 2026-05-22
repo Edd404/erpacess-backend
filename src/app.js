@@ -59,14 +59,9 @@ app.use(morgan(morganFormat, {
 const API_PREFIX = `/api/${process.env.API_VERSION || 'v1'}`;
 app.use(API_PREFIX, routes);
 
-// Rota raiz
+// Rota raiz — sem info sensível
 app.get('/', (req, res) => {
-  res.json({
-    name: 'iPhone Store API',
-    version: '1.0.0',
-    docs: `${API_PREFIX}/health`,
-    timestamp: new Date().toISOString(),
-  });
+  res.json({ status: 'ok' });
 });
 
 // ═══════════════════════════════════════════════════════════════

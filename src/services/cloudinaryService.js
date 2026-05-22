@@ -1,27 +1,32 @@
 /**
  * cloudinaryService.js  (BACKEND)
- * Retorna a URL do documento armazenada no banco.
- * A proteção real é feita pelo JWT no backend — nenhuma rota que
- * retorna document_url é acessível sem autenticação.
+ * Reconstrói signed_document_url a partir do public_id quando a URL foi apagada.
+ * O frontend sempre espera o campo signed_document_url.
  */
 
+const CLOUD_NAME = process.env.CLOUDINARY_CLOUD_NAME || 'dasqf9aie';
+
 /**
- * Normaliza o objeto de ordem para expor document_url de forma consistente,
- * sem vazar signed_document_url diretamente no payload.
+ * Garante que signed_document_url está preenchida.
+ * Se foi apagada mas o public_id existe, reconstrói a URL pública.
  *
  * @param {object} order — linha da tabela service_orders
- * @returns {object}     — ordem com document_url (sem signed_document_url exposta)
+ * @returns {object}     — ordem com signed_document_url restaurada
  */
 const attachSignedDocumentUrl = (order) => {
   if (!order) return order;
 
-  const { signed_document_url, signed_document_public_id, ...rest } = order;
+  let url = order.signed_document_url;
+
+  // Reconstrói URL a partir do public_id se foi apagada
+  if (!url && order.signed_document_public_id) {
+    url = `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/${order.signed_document_public_id}`;
+  }
 
   return {
-    ...rest,
-    signed_document_at: order.signed_document_at,
-    document_url:  signed_document_url || null,
-    has_document:  !!signed_document_public_id || !!signed_document_url,
+    ...order,
+    signed_document_url: url || null,
+    has_document: !!url,
   };
 };
 

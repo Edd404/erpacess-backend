@@ -259,6 +259,16 @@ const validatePagination = [
   handleValidationErrors,
 ];
 
+const validateSearch = [
+  query('q')
+    .optional()
+    .isString()
+    .trim()
+    .isLength({ min: 2, max: 100 })
+    .withMessage('Busca deve ter entre 2 e 100 caracteres.'),
+  handleValidationErrors,
+];
+
 module.exports = {
   validateLogin,
   validateRegisterUser,
@@ -267,5 +277,6 @@ module.exports = {
   validateCreateServiceOrder,
   validateUpdateServiceOrder,
   validatePagination,
+  validateSearch,
   handleValidationErrors,
 };

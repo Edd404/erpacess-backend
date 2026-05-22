@@ -3,6 +3,7 @@ const { generateWarrantyPDF } = require('../services/pdfService');
 const { sendWarrantyEmail } = require('../services/emailService');
 const { generateServiceOrderNumber, paginate } = require('../utils/helpers');
 const logger = require('../utils/logger');
+const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
 
 /**
  * GET /api/v1/orders
@@ -109,7 +110,7 @@ const getOrder = async (req, res) => {
       [req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Ordem de serviço não encontrada.' });
-    res.json({ data: result.rows[0] });
+    res.json({ data: attachSignedDocumentUrl(result.rows[0]) });
   } catch (error) {
     logger.error('Erro ao buscar ordem:', error);
     res.status(500).json({ error: 'Erro ao buscar ordem de serviço.' });
@@ -688,25 +689,28 @@ const deleteOrder = async (req, res) => {
  */
 const saveDocument = async (req, res) => {
   try {
-    const { url, public_id } = req.body;
-    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
-      return res.status(422).json({ error: 'URL inválida.' });
+    const { public_id } = req.body;
+    if (!public_id || typeof public_id !== 'string') {
+      return res.status(422).json({ error: 'public_id do documento é obrigatório.' });
     }
 
     const result = await query(
       `UPDATE service_orders
-       SET signed_document_url       = $1,
-           signed_document_public_id = $2,
+       SET signed_document_url       = NULL,
+           signed_document_public_id = $1,
            signed_document_at        = NOW(),
            updated_at                = NOW()
-       WHERE id = $3 AND deleted_at IS NULL
-       RETURNING id, order_number, signed_document_url, signed_document_at`,
-      [url, public_id || null, req.params.id]
+       WHERE id = $2 AND deleted_at IS NULL
+       RETURNING id, order_number, signed_document_public_id, signed_document_at`,
+      [public_id, req.params.id]
     );
     if (!result.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
 
+    const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
+    const order = attachSignedDocumentUrl(result.rows[0]);
+
     logger.info(`Documento anexado à ordem ${result.rows[0].order_number} por ${req.user.id}`);
-    res.json({ message: 'Documento salvo com sucesso.', data: result.rows[0] });
+    res.json({ message: 'Documento salvo com sucesso.', data: order });
   } catch (error) {
     logger.error('Erro ao salvar documento:', error);
     res.status(500).json({ error: 'Erro ao salvar documento.' });

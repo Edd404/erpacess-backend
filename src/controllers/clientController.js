@@ -106,7 +106,7 @@ const getClientHistory = async (req, res) => {
     const ordersRes = await query(
       `SELECT id, order_number, type, status, iphone_model, capacity, color,
               imei, price, payment_methods, warranty_months, notes, condition_sale,
-              signed_document_url, signed_document_at,
+              signed_document_url, signed_document_public_id, signed_document_at,
               created_at
        FROM service_orders
        WHERE client_id = $1 AND deleted_at IS NULL

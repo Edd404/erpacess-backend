@@ -12,27 +12,28 @@ const {
   validateCreateServiceOrder,
   validateUpdateServiceOrder,
   validatePagination,
+  validateSearch,
 } = require('../middleware/validation');
 
 const router = Router();
 
-// ── PING / HEALTH ─────────────────────────────────────────────
+// ── PING (público — apenas pong, sem info) ────────────────────
 router.get('/ping', (req, res) =>
-  res.status(200).json({ pong: true, ts: Date.now() })
+  res.status(200).json({ pong: true })
 );
 
-router.get('/health', async (req, res) => {
+// ── HEALTH (autenticado — só admin/gerente) ───────────────────
+router.get('/health', authenticate, authorize('admin', 'gerente'), async (req, res) => {
   try {
     const { healthCheck } = require('../config/database');
     const db = await healthCheck();
     res.status(db.healthy ? 200 : 503).json({
       status: db.healthy ? 'ok' : 'degraded',
       timestamp: new Date().toISOString(),
-      database: db, uptime: process.uptime(),
-      environment: process.env.NODE_ENV,
+      database: db,
     });
   } catch (err) {
-    res.status(503).json({ status: 'error', error: err.message });
+    res.status(503).json({ status: 'error' });
   }
 });
 
@@ -40,6 +41,7 @@ router.get('/health', async (req, res) => {
 const authRouter = Router();
 authRouter.post('/login',            authLimiter, validateLogin, authController.login);
 authRouter.post('/refresh',          authController.refreshToken);
+authRouter.post('/logout',           authenticate, authController.logout);
 authRouter.get('/me',                authenticate, authController.getMe);
 authRouter.patch('/change-password', authenticate, authController.changePassword);
 
@@ -47,7 +49,7 @@ authRouter.patch('/change-password', authenticate, authController.changePassword
 const clientRouter = Router();
 clientRouter.use(authenticate);
 clientRouter.get('/',            validatePagination, clientController.listClients);
-clientRouter.get('/search',      clientController.searchClients);
+clientRouter.get('/search',      validateSearch, clientController.searchClients);
 clientRouter.get('/cep/:cep',    clientController.lookupCEP);
 clientRouter.get('/:id/history', clientController.getClientHistory);
 clientRouter.get('/:id',         clientController.getClient);
@@ -60,7 +62,7 @@ const orderRouter = Router();
 orderRouter.use(authenticate);
 // ⚠️ rotas estáticas ANTES de /:id
 orderRouter.get('/stats',            orderController.getStats);
-orderRouter.get('/search',           orderController.searchOrders);
+orderRouter.get('/search',           validateSearch, orderController.searchOrders);
 orderRouter.get('/notifications',    orderController.getNotifications);
 orderRouter.get('/seller-ranking',   orderController.getSellerRanking);
 orderRouter.get('/model-comparison', orderController.getModelComparison);

@@ -99,6 +99,31 @@ adminRouter.post('/models',                 adminController.createModel);
 adminRouter.patch('/models/:id',            adminController.updateModel);
 
 
+
+// ── RESTORE backup (admin only) ───────────────────────────────
+adminRouter.post('/backup/restore', async (req, res) => {
+  try {
+    const { data, tables, mode } = req.body;
+
+    if (!data || !tables || !Array.isArray(tables) || tables.length === 0) {
+      return res.status(400).json({ error: 'Parâmetros inválidos. Envie data, tables e mode.' });
+    }
+
+    const ALLOWED_TABLES = ['users', 'clients', 'service_orders'];
+    const invalidTables  = tables.filter(t => !ALLOWED_TABLES.includes(t));
+    if (invalidTables.length > 0) {
+      return res.status(400).json({ error: `Tabelas não permitidas: ${invalidTables.join(', ')}` });
+    }
+
+    const { restoreBackup } = require('../services/backupService');
+    const results = await restoreBackup({ data, tables, mode: mode || 'missing_only' });
+
+    return res.json({ message: 'Restauração concluída.', results });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── BACKUP manual (admin only) ────────────────────────────────
 adminRouter.post('/backup/run', async (req, res) => {
   try {

@@ -367,8 +367,9 @@ const getStats = async (req, res) => {
       query(`
         SELECT
           CASE
-            WHEN notes ILIKE '%Origem: Instagram/Indicação%' OR notes ILIKE '%Origem: Instagram/Indicacao%' THEN 'Instagram/Indicação'
-            WHEN notes ILIKE '%Origem: Já é cliente%'       OR notes ILIKE '%Origem: Ja e cliente%'        THEN 'Já é cliente'
+            WHEN notes ILIKE '%Origem: Instagram%'           THEN 'Instagram'
+            WHEN notes ILIKE '%Origem: Indicação%'           OR notes ILIKE '%Origem: Indicacao%'           THEN 'Indicação'
+            WHEN notes ILIKE '%Origem: Já é cliente%'        OR notes ILIKE '%Origem: Ja e cliente%'        THEN 'Já é cliente'
             ELSE 'Não informado'
           END AS origem,
           COUNT(*) as total,

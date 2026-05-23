@@ -49,7 +49,6 @@ const runBackup = async () => {
                     !process.env.RESEND_API_KEY.startsWith('re_xxx');
 
     if (canSend) {
-      const { sendEmail } = require('./emailService');
 
       const totalRows = Object.values(rowCounts).reduce((a, b) => a + b, 0);
       const dateStr   = startedAt.toLocaleString('pt-BR', {
@@ -161,15 +160,28 @@ const runBackup = async () => {
 </body>
 </html>`;
 
-      await sendEmail({
-        to: BACKUP_RECIPIENT,
-        subject: `🗄️ Backup iStore — ${startedAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
-        html,
-        attachments: [{
-          filename: fileName,
-          content:  compressed.toString('base64'),
-        }],
+      const resendRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: `${process.env.EMAIL_FROM_NAME || 'Acessphones'} <${process.env.EMAIL_FROM_ADDRESS}>`,
+          to: [BACKUP_RECIPIENT],
+          subject: `🗄️ Backup iStore — ${startedAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
+          html,
+          attachments: [{
+            filename: fileName,
+            content:  compressed.toString('base64'),
+          }],
+        }),
       });
+
+      if (!resendRes.ok) {
+        const resendErr = await resendRes.json().catch(() => ({}));
+        throw new Error(`Resend error: ${resendErr.message || resendRes.statusText}`);
+      }
 
       logger.info(`✅ Backup enviado para ${BACKUP_RECIPIENT} (${sizeKB} KB)`);
     } else {

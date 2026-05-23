@@ -264,4 +264,76 @@ const startBackupCron = async () => {
   scheduleNext();
 };
 
-module.exports = { runBackup, startBackupCron };
+
+
+// ── Restaura um backup ─────────────────────────────────────────
+// mode: 'missing_only' → só insere se o id não existe (seguro)
+//       'overwrite'    → atualiza registros existentes também
+const restoreBackup = async ({ data, tables, mode = 'missing_only' }) => {
+  const results = {};
+
+  // Colunas que nunca devem ser sobrescritas no modo overwrite
+  const PROTECTED = {
+    users: ['password_hash', 'created_at'],
+  };
+
+  for (const table of tables) {
+    const rows = data[table];
+    if (!Array.isArray(rows) || rows.length === 0) {
+      results[table] = { inserted: 0, skipped: 0 };
+      continue;
+    }
+
+    let inserted = 0;
+    let skipped  = 0;
+
+    for (const row of rows) {
+      try {
+        const allCols = Object.keys(row);
+
+        // Remove colunas protegidas no modo overwrite
+        const protected_ = PROTECTED[table] || [];
+        const setCols    = allCols.filter(c => c !== 'id' && !protected_.includes(c));
+
+        const cols    = allCols;
+        const vals    = cols.map(c => row[c]);
+        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+        const colList = cols.map(c => `"${c}"`).join(', ');
+
+        let sql;
+        if (mode === 'overwrite') {
+          const setClause = setCols
+            .map(c => `"${c}" = EXCLUDED."${c}"`)
+            .join(', ');
+          sql = `
+            INSERT INTO ${table} (${colList})
+            VALUES (${placeholders})
+            ON CONFLICT (id) DO UPDATE SET ${setClause}
+          `;
+        } else {
+          sql = `
+            INSERT INTO ${table} (${colList})
+            VALUES (${placeholders})
+            ON CONFLICT (id) DO NOTHING
+          `;
+        }
+
+        const res = await query(sql, vals);
+        if (res.rowCount > 0) inserted++;
+        else skipped++;
+
+      } catch (err) {
+        logger.warn(`Restore ${table} row ${row.id}: ${err.message}`);
+        skipped++;
+      }
+    }
+
+    results[table] = { inserted, skipped };
+    logger.info(`✅ Restore ${table}: ${inserted} inseridos, ${skipped} ignorados`);
+  }
+
+  return results;
+};
+
+module.exports = { runBackup, startBackupCron, restoreBackup };
+

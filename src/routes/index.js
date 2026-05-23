@@ -98,6 +98,26 @@ adminRouter.get('/models/active',           adminController.listActiveModels);
 adminRouter.post('/models',                 adminController.createModel);
 adminRouter.patch('/models/:id',            adminController.updateModel);
 
+
+// ── BACKUP manual (admin only) ────────────────────────────────
+adminRouter.post('/backup/run', async (req, res) => {
+  try {
+    const { runBackup } = require('../services/backupService');
+    const result = await runBackup();
+    if (result.success) {
+      return res.json({
+        message: 'Backup executado com sucesso.',
+        fileName: result.fileName,
+        sizeKB:   result.sizeKB,
+        rowCounts: result.rowCounts,
+      });
+    }
+    return res.status(500).json({ error: result.error || 'Falha no backup.' });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ── MONTA ─────────────────────────────────────────────────────
 router.use('/auth',    authRouter);
 router.use('/clients', clientRouter);

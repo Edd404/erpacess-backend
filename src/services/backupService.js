@@ -266,16 +266,14 @@ const startBackupCron = async () => {
 
 
 
-// ── Restaura um backup ─────────────────────────────────────────
+// ── Restaura um backup (bulk INSERT — uma query por tabela) ───
 // mode: 'missing_only' → só insere se o id não existe (seguro)
 //       'overwrite'    → atualiza registros existentes também
 const restoreBackup = async ({ data, tables, mode = 'missing_only' }) => {
   const results = {};
 
   // Colunas que nunca devem ser sobrescritas no modo overwrite
-  const PROTECTED = {
-    users: ['password_hash', 'created_at'],
-  };
+  const PROTECTED = { users: ['password_hash', 'created_at'] };
 
   for (const table of tables) {
     const rows = data[table];
@@ -284,52 +282,48 @@ const restoreBackup = async ({ data, tables, mode = 'missing_only' }) => {
       continue;
     }
 
-    let inserted = 0;
-    let skipped  = 0;
+    try {
+      // Deriva colunas do primeiro registro (todos devem ter as mesmas colunas)
+      const allCols     = Object.keys(rows[0]);
+      const protected_  = PROTECTED[table] || [];
+      const setCols     = allCols.filter(c => c !== 'id' && !protected_.includes(c));
+      const colList     = allCols.map(c => `"${c}"`).join(', ');
 
-    for (const row of rows) {
-      try {
-        const allCols = Object.keys(row);
+      // Monta os placeholders em lotes de 500 linhas para evitar limite do pg
+      const BATCH = 500;
+      let totalInserted = 0;
+      let totalSkipped  = 0;
 
-        // Remove colunas protegidas no modo overwrite
-        const protected_ = PROTECTED[table] || [];
-        const setCols    = allCols.filter(c => c !== 'id' && !protected_.includes(c));
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const batch  = rows.slice(i, i + BATCH);
+        const values = [];
+        const placeholders = batch.map((row, ri) => {
+          const offset = ri * allCols.length;
+          allCols.forEach(c => values.push(row[c]));
+          return `(${allCols.map((_, ci) => `$${offset + ci + 1}`).join(', ')})`;
+        }).join(', ');
 
-        const cols    = allCols;
-        const vals    = cols.map(c => row[c]);
-        const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-        const colList = cols.map(c => `"${c}"`).join(', ');
-
-        let sql;
+        let conflict;
         if (mode === 'overwrite') {
-          const setClause = setCols
-            .map(c => `"${c}" = EXCLUDED."${c}"`)
-            .join(', ');
-          sql = `
-            INSERT INTO ${table} (${colList})
-            VALUES (${placeholders})
-            ON CONFLICT (id) DO UPDATE SET ${setClause}
-          `;
+          const setClause = setCols.map(c => `"${c}" = EXCLUDED."${c}"`).join(', ');
+          conflict = `ON CONFLICT (id) DO UPDATE SET ${setClause}`;
         } else {
-          sql = `
-            INSERT INTO ${table} (${colList})
-            VALUES (${placeholders})
-            ON CONFLICT (id) DO NOTHING
-          `;
+          conflict = `ON CONFLICT (id) DO NOTHING`;
         }
 
-        const res = await query(sql, vals);
-        if (res.rowCount > 0) inserted++;
-        else skipped++;
-
-      } catch (err) {
-        logger.warn(`Restore ${table} row ${row.id}: ${err.message}`);
-        skipped++;
+        const sql = `INSERT INTO ${table} (${colList}) VALUES ${placeholders} ${conflict}`;
+        const res = await query(sql, values);
+        totalInserted += res.rowCount;
+        totalSkipped  += batch.length - res.rowCount;
       }
-    }
 
-    results[table] = { inserted, skipped };
-    logger.info(`✅ Restore ${table}: ${inserted} inseridos, ${skipped} ignorados`);
+      results[table] = { inserted: totalInserted, skipped: totalSkipped };
+      logger.info(`✅ Restore ${table}: ${totalInserted} inseridos, ${totalSkipped} ignorados`);
+
+    } catch (err) {
+      logger.error(`❌ Restore ${table}: ${err.message}`);
+      results[table] = { inserted: 0, skipped: rows.length, error: err.message };
+    }
   }
 
   return results;

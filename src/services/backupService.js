@@ -49,10 +49,12 @@ const runBackup = async () => {
       const { sendEmail } = require('./emailService');
 
       const totalRows = Object.values(rowCounts).reduce((a, b) => a + b, 0);
-      const dateStr   = startedAt.toLocaleDateString('pt-BR', {
+      const dateStr   = startedAt.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
         weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
       });
-      const timeStr   = startedAt.toLocaleTimeString('pt-BR', {
+      const timeStr   = startedAt.toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
         hour: '2-digit', minute: '2-digit',
       });
 
@@ -149,7 +151,7 @@ const runBackup = async () => {
 
   <div class="ft">
     <p><strong>iStore · Acessphones</strong></p>
-    <p>Backup automático gerado às ${timeStr} · Próximo backup amanhã às 03:00</p>
+    <p>Backup automático gerado às ${timeStr} BRT · Próximo backup amanhã às 03:00</p>
     <p style="margin-top:6px;color:#C7C7CC;font-size:10px">Este e-mail é gerado automaticamente — não responda.</p>
   </div>
 </div>
@@ -158,7 +160,7 @@ const runBackup = async () => {
 
       await sendEmail({
         to: BACKUP_RECIPIENT,
-        subject: `🗄️ Backup iStore — ${startedAt.toLocaleDateString('pt-BR')}`,
+        subject: `🗄️ Backup iStore — ${startedAt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
         html,
         attachments: [{
           filename: fileName,
@@ -191,26 +193,56 @@ const runBackup = async () => {
   }
 };
 
-// ── Cron diário às 03:00 (sem dependência externa) ─────────────
-const startBackupCron = () => {
+// ── Cron diário às 03:00 BRT (= 06:00 UTC) — sem dependência externa ──
+// Correção: Render roda em UTC. setHours() usaria UTC como hora local e
+// agendaria para 03:00 UTC = 00:00 BRT (meia-noite), nunca às 03h BRT.
+// Usamos setUTCHours(6) para apontar para 06:00 UTC = 03:00 BRT.
+//
+// Também verifica no startup se houve backup perdido (server restart
+// apaga o setTimeout e quebra a corrente de agendamentos).
+const startBackupCron = async () => {
+  // ── 1. Verificação de backup perdido no startup ────────────────
+  try {
+    const last = await query(
+      `SELECT created_at FROM backup_logs WHERE status = 'success' ORDER BY created_at DESC LIMIT 1`
+    );
+    if (last.rows.length === 0) {
+      logger.info('🗄️  Nenhum backup encontrado — executando backup inicial...');
+      await runBackup();
+    } else {
+      const lastAt   = new Date(last.rows[0].created_at);
+      const hoursAgo = (Date.now() - lastAt.getTime()) / 36e5;
+      if (hoursAgo > 20) {
+        logger.info(`🗄️  Último backup foi há ${hoursAgo.toFixed(1)}h — executando backup recuperado...`);
+        await runBackup();
+      } else {
+        logger.info(`🗄️  Último backup OK (${hoursAgo.toFixed(1)}h atrás) — aguardando próximo agendamento.`);
+      }
+    }
+  } catch (err) {
+    logger.warn('🗄️  Não foi possível verificar backup_logs no startup:', err.message);
+  }
+
+  // ── 2. Agenda próximas execuções às 03:00 BRT (= 06:00 UTC) ───
   const scheduleNext = () => {
     const now  = new Date();
     const next = new Date();
 
-    // Próximas 03:00
-    next.setHours(3, 0, 0, 0);
-    if (next <= now) next.setDate(next.getDate() + 1); // já passou hoje → amanhã
+    next.setUTCHours(6, 0, 0, 0); // 06:00 UTC = 03:00 BRT
+    if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
 
-    const delay = next - now;
-    const hh    = String(next.getHours()).padStart(2, '0');
-    const mm    = String(next.getMinutes()).padStart(2, '0');
-    const dd    = next.toLocaleDateString('pt-BR');
+    const delay  = next - now;
+    const brtStr = next.toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      weekday: 'short', day: '2-digit', month: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    });
 
-    logger.info(`🗄️  Próximo backup agendado: ${dd} às ${hh}:${mm} (em ${Math.round(delay / 60000)} min)`);
+    logger.info(`🗄️  Próximo backup agendado: ${brtStr} BRT (em ${Math.round(delay / 60000)} min)`);
 
     setTimeout(async () => {
       await runBackup();
-      scheduleNext(); // reagendar para o dia seguinte
+      scheduleNext();
     }, delay);
   };
 

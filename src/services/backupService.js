@@ -18,9 +18,12 @@ const runBackup = async () => {
 
   try {
     // 1. Exportar cada tabela
+    // Apenas clients e service_orders têm soft delete (deleted_at); users não tem.
+    const SOFT_DELETE_TABLES = ['clients', 'service_orders'];
     for (const table of TABLES) {
+      const whereClause = SOFT_DELETE_TABLES.includes(table) ? 'WHERE deleted_at IS NULL' : '';
       const res = await query(
-        `SELECT * FROM ${table} WHERE deleted_at IS NULL ORDER BY created_at ASC`
+        `SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC`
       );
       exportData[table] = res.rows;
       rowCounts[table]  = res.rows.length;

@@ -299,15 +299,100 @@ const generateWarrantyPDF = async (orderData) => {
       // ── 7. PAGAMENTO ───────────────────────────────────────
       y = sectionLabel(doc, 'Informações de Pagamento', y + 8);
 
-      cell(doc, ML, y, CW*0.72, CH, 'Formas de Pagamento', fmtPayments(orderData.payment_methods), { valSize: 9 });
+      // Parse dados estruturados
+      const accList = (() => {
+        try { return Array.isArray(orderData.accessories) ? orderData.accessories : JSON.parse(orderData.accessories || '[]') }
+        catch { return [] }
+      })()
 
-      // Caixa do valor total com borda preta destacada
-      strokeRect(doc, ML + CW*0.72, y, CW*0.28, CH, C.black, 1);
+      const pd = (() => {
+        try { return typeof orderData.payment_details === 'object' && orderData.payment_details !== null
+          ? orderData.payment_details
+          : JSON.parse(orderData.payment_details || '{}') }
+        catch { return {} }
+      })()
+
+      const basePrice    = parseFloat(orderData.price) || 0
+      const accTotal     = accList.reduce((s, a) => s + (parseFloat(a.price) || 0), 0)
+      const devicePrice  = basePrice - accTotal
+      const tradeValue   = parseFloat(pd.iphone_entrada?.value) || 0
+
+      const PAYMENT_LABELS = {
+        pix:            'Pix',
+        dinheiro:       'Dinheiro',
+        cartao_credito: 'Cartão de Crédito',
+        cartao_debito:  'Cartão de Débito',
+        iphone_entrada: 'iPhone como Entrada',
+      }
+
+      // Linha do aparelho (apenas venda)
+      if (!isManut) {
+        cell(doc, ML, y, CW * 0.72, CH, 'Aparelho', `${orderData.iphone_model}${orderData.capacity ? ' · ' + orderData.capacity : ''}`, { valSize: 9 })
+        cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor do Aparelho', formatCurrency(devicePrice), { valSize: 9, align: 'right' })
+        y += CH
+      }
+
+      // Linhas de acessórios (se houver)
+      if (accList.length > 0) {
+        accList.forEach(acc => {
+          const accPrice = parseFloat(acc.price) || 0
+          cell(doc, ML, y, CW * 0.72, CH, 'Acessório',       acc.name || '—', { valSize: 9 })
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor', formatCurrency(accPrice), { valSize: 9, align: 'right' })
+          y += CH
+        })
+      }
+
+      // iPhone de entrada (se houver)
+      if (tradeValue > 0 && pd.iphone_entrada) {
+        const tradeName = [pd.iphone_entrada.model, pd.iphone_entrada.capacity, pd.iphone_entrada.color]
+          .filter(Boolean).join(' · ') || 'iPhone de Entrada'
+        const tradeImei = pd.iphone_entrada.imei ? `IMEI: ${pd.iphone_entrada.imei}` : ''
+
+        fillRect(doc, ML, y, CW, CH, '#F5FFF8')
+        cell(doc, ML, y, CW * 0.72, CH, 'iPhone como Entrada',
+          tradeName + (tradeImei ? '\n' + tradeImei : ''),
+          { valSize: 8, valFont: 'Helvetica', bg: '#F5FFF8', labelColor: C.green }
+        )
+        cell(doc, ML + CW * 0.72, y, CW * 0.28, CH,
+          '(–) Abatido', `– ${formatCurrency(tradeValue)}`,
+          { valSize: 9, valColor: C.green, bg: '#F5FFF8', align: 'right' }
+        )
+        y += CH
+      }
+
+      // Formas de pagamento em dinheiro/cartão/pix
+      const cashMethods = (Array.isArray(orderData.payment_methods)
+        ? orderData.payment_methods
+        : (() => { try { return JSON.parse(orderData.payment_methods || '[]') } catch { return [] } })()
+      ).filter(m => m !== 'iphone_entrada')
+
+      if (cashMethods.length > 0) {
+        cashMethods.forEach(method => {
+          const methodVal = parseFloat(pd[method]?.value) || 0
+          const parcelas  = pd[method]?.parcelas ? parseInt(pd[method].parcelas) : null
+          const label     = PAYMENT_LABELS[method] || method
+          const suffix    = method === 'cartao_credito' && parcelas && parcelas > 1 ? ` (${parcelas}x)` : ''
+          cell(doc, ML, y, CW * 0.72, CH, 'Forma de Pagamento', label + suffix, { valSize: 9 })
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor Pago',
+            methodVal > 0 ? formatCurrency(methodVal) : '—',
+            { valSize: 9, align: 'right' }
+          )
+          y += CH
+        })
+      }
+
+      // Totalizador destacado
+      strokeRect(doc, ML + CW * 0.72, y, CW * 0.28, CH, C.black, 1)
       doc.save().fillColor(C.ink4).fontSize(6).font('Helvetica')
-        .text('VALOR TOTAL', ML + CW*0.72, y + 3, { width: CW*0.28, align: 'center', characterSpacing: 0.5 }).restore();
+        .text('VALOR TOTAL', ML + CW * 0.72, y + 3, { width: CW * 0.28, align: 'center', characterSpacing: 0.5 }).restore()
       doc.save().fillColor(C.black).fontSize(13).font('Helvetica-Bold')
-        .text(formatCurrency(orderData.price), ML + CW*0.72, y + 12, { width: CW*0.28, align: 'center' }).restore();
-      y += CH;
+        .text(formatCurrency(basePrice), ML + CW * 0.72, y + 12, { width: CW * 0.28, align: 'center' }).restore()
+
+      // Célula de formas (resumo) ao lado do total
+      const fmtShort = cashMethods.map(m => PAYMENT_LABELS[m] || m).join(' · ')
+        + (tradeValue > 0 ? (cashMethods.length ? ' · iPhone Entrada' : 'iPhone Entrada') : '')
+      cell(doc, ML, y, CW * 0.72, CH, 'Formas de Pagamento', fmtShort || '—', { valSize: 8.5 })
+      y += CH
 
       // ── 8. GARANTIA ────────────────────────────────────────
       y = sectionLabel(doc, 'Termo de Garantia', y + 8);

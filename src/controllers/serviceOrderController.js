@@ -45,6 +45,7 @@ const listOrders = async (req, res) => {
               so.iphone_model, so.capacity, so.color, so.imei,
               so.price, so.warranty_months, so.payment_methods,
               so.condition_sale, so.notes,
+              so.accessories, so.payment_details,
               so.created_at, so.updated_at,
               c.id as client_id, c.name as client_name,
               c.phone as client_phone, c.email as client_email
@@ -125,6 +126,7 @@ const createOrder = async (req, res) => {
     const {
       client_id, type, iphone_model, capacity, color,
       imei, price, warranty_months = 3, payment_methods, notes, condition_sale,
+      accessories = [], payment_details = {},
     } = req.body;
 
     const clientResult = await query(
@@ -147,8 +149,9 @@ const createOrder = async (req, res) => {
       const result = await client_tx.query(
         `INSERT INTO service_orders (
           order_number, client_id, type, iphone_model, capacity,
-          color, imei, price, warranty_months, payment_methods, notes, created_by, condition_sale
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          color, imei, price, warranty_months, payment_methods, notes, created_by, condition_sale,
+          accessories, payment_details
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING *`,
         [
           orderNumber, client_id, type, iphone_model.trim(),
@@ -158,6 +161,8 @@ const createOrder = async (req, res) => {
           JSON.stringify(payment_methods),
           notes?.trim() || null, req.user.id,
           ['lacrado','seminovo'].includes(condition_sale) ? condition_sale : null,
+          JSON.stringify(accessories || []),
+          JSON.stringify(payment_details || {}),
         ]
       );
       return result.rows[0];
@@ -617,7 +622,7 @@ const updateOrder = async (req, res) => {
     const {
       type, iphone_model, capacity, color,
       imei, price, warranty_months, payment_methods,
-      notes, condition_sale,
+      notes, condition_sale, accessories, payment_details,
     } = req.body;
 
     const existing = await query(
@@ -638,6 +643,8 @@ const updateOrder = async (req, res) => {
         payment_methods  = COALESCE($8,  payment_methods),
         notes            = $9,
         condition_sale   = $10,
+        accessories      = COALESCE($12, accessories),
+        payment_details  = COALESCE($13, payment_details),
         updated_at       = NOW()
        WHERE id = $11 AND deleted_at IS NULL
        RETURNING *`,
@@ -653,6 +660,8 @@ const updateOrder = async (req, res) => {
         notes?.trim()  ?? null,
         ['lacrado','seminovo'].includes(condition_sale) ? condition_sale : null,
         req.params.id,
+        accessories     ? JSON.stringify(accessories)    : null,
+        payment_details ? JSON.stringify(payment_details): null,
       ]
     );
 

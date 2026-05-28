@@ -111,6 +111,16 @@ const fmtCondition = (c) =>
 
 const fmtType = (t) => t === 'venda' ? 'COMPRA E VENDA' : 'ORDEM DE SERVIÇO';
 
+// Converte string de moeda brasileira para número
+// '1.500,00' → 1500 | '500,00' → 500 | 50 → 50
+const parseBRL = (v) => {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  const cleaned = String(v).replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+};
+
 const parseNotes = (notes) => {
   if (!notes) return { services: null, problem: null, free: null };
   const lines = notes.split('\n');
@@ -331,11 +341,11 @@ const generateWarrantyPDF = async (orderData) => {
       })();
 
       const totalPrice   = parseFloat(orderData.price) || 0;
-      const accTotal     = accList.reduce((s, a) => s + (parseFloat(a.price) || 0), 0);
+      const accTotal     = accList.reduce((s, a) => s + parseBRL(a.price), 0);
       const devicePrice  = totalPrice - accTotal;
-      const tradeValue   = parseFloat(pd.iphone_entrada?.value) || 0;
+      const tradeValue   = parseBRL(pd.iphone_entrada?.value);
       const cashMethods  = methodsArr.filter(m => m !== 'iphone_entrada');
-      const hasDetails   = accList.length > 0 || tradeValue > 0 || cashMethods.some(m => pd[m]?.value > 0);
+      const hasDetails   = accList.length > 0 || tradeValue > 0 || cashMethods.some(m => parseBRL(pd[m]?.value) > 0);
 
       if (hasDetails) {
         // --- Linha do aparelho (venda) ---
@@ -374,7 +384,7 @@ const generateWarrantyPDF = async (orderData) => {
 
         // --- Formas de pagamento em dinheiro/pix/cartão ---
         cashMethods.forEach(m => {
-          const val      = parseFloat(pd[m]?.value) || 0;
+          const val      = parseBRL(pd[m]?.value);
           const parcelas = pd[m]?.parcelas ? parseInt(pd[m].parcelas) : null;
           const label    = PAY_LABELS_PDF[m] || m;
           const suffix   = m === 'cartao_credito' && parcelas && parcelas > 1 ? ` (${parcelas}x)` : '';

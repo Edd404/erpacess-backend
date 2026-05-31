@@ -111,6 +111,16 @@ const fmtCondition = (c) =>
 
 const fmtType = (t) => t === 'venda' ? 'COMPRA E VENDA' : 'ORDEM DE SERVIÇO';
 
+// Converte string de moeda brasileira para número
+// '1.500,00' → 1500 | '500,00' → 500 | 50 → 50
+const parseBRL = (v) => {
+  if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  const cleaned = String(v).replace(/\./g, '').replace(',', '.');
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? 0 : n;
+};
+
 const parseNotes = (notes) => {
   if (!notes) return { services: null, problem: null, free: null };
   const lines = notes.split('\n');
@@ -299,15 +309,116 @@ const generateWarrantyPDF = async (orderData) => {
       // ── 7. PAGAMENTO ───────────────────────────────────────
       y = sectionLabel(doc, 'Informações de Pagamento', y + 8);
 
-      cell(doc, ML, y, CW*0.72, CH, 'Formas de Pagamento', fmtPayments(orderData.payment_methods), { valSize: 9 });
+      // Parse accessories e payment_details (novos campos — fallback seguro para ordens antigas)
+      const accList = (() => {
+        try {
+          const v = orderData.accessories;
+          return Array.isArray(v) ? v : JSON.parse(v || '[]');
+        } catch { return []; }
+      })();
 
-      // Caixa do valor total com borda preta destacada
-      strokeRect(doc, ML + CW*0.72, y, CW*0.28, CH, C.black, 1);
-      doc.save().fillColor(C.ink4).fontSize(6).font('Helvetica')
-        .text('VALOR TOTAL', ML + CW*0.72, y + 3, { width: CW*0.28, align: 'center', characterSpacing: 0.5 }).restore();
-      doc.save().fillColor(C.black).fontSize(13).font('Helvetica-Bold')
-        .text(formatCurrency(orderData.price), ML + CW*0.72, y + 12, { width: CW*0.28, align: 'center' }).restore();
-      y += CH;
+      const pd = (() => {
+        try {
+          const v = orderData.payment_details;
+          if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+          return JSON.parse(v || '{}');
+        } catch { return {}; }
+      })();
+
+      const PAY_LABELS_PDF = {
+        pix:            'Pix',
+        dinheiro:       'Dinheiro',
+        cartao_credito: 'Cartão de Crédito',
+        cartao_debito:  'Cartão de Débito',
+        iphone_entrada: 'iPhone como Entrada',
+      };
+
+      const methodsArr = (() => {
+        try {
+          const v = orderData.payment_methods;
+          return Array.isArray(v) ? v : JSON.parse(v || '[]');
+        } catch { return []; }
+      })();
+
+      const totalPrice   = parseFloat(orderData.price) || 0;
+      const accTotal     = accList.reduce((s, a) => s + parseBRL(a.price), 0);
+      const devicePrice  = totalPrice - accTotal;
+      const tradeValue   = parseBRL(pd.iphone_entrada?.value);
+      const hasTradeIn   = methodsArr.includes('iphone_entrada');
+      const cashMethods  = methodsArr.filter(m => m !== 'iphone_entrada');
+      const hasDetails   = accList.length > 0 || hasTradeIn || cashMethods.some(m => parseBRL(pd[m]?.value) > 0);
+
+      if (hasDetails) {
+        // --- Linha do aparelho (venda) ---
+        if (!isManut) {
+          const modelLabel = `${orderData.iphone_model}${orderData.capacity ? ' · ' + orderData.capacity : ''}`;
+          cell(doc, ML,            y, CW * 0.72, CH, 'Aparelho', modelLabel, { valSize: 9 });
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor do Aparelho', formatCurrency(devicePrice), { valSize: 9, align: 'right' });
+          y += CH;
+        }
+
+        // --- Linhas de acessórios ---
+        accList.forEach(acc => {
+          cell(doc, ML,            y, CW * 0.72, CH, 'Acessório', acc.name || '—', { valSize: 9 });
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor', formatCurrency(parseFloat(acc.price) || 0), { valSize: 9, align: 'right' });
+          y += CH;
+        });
+
+        // --- iPhone de entrada ---
+        if (hasTradeIn) {
+          const tradeName = [
+            pd.iphone_entrada?.model,
+            pd.iphone_entrada?.capacity,
+            pd.iphone_entrada?.color,
+          ].filter(Boolean).join(' · ') || 'iPhone';
+          const tradeImei = pd.iphone_entrada?.imei ? `  IMEI: ${pd.iphone_entrada.imei}` : '';
+
+          fillRect(doc, ML, y, CW, CH, '#F0FDF4');
+          cell(doc, ML,            y, CW * 0.72, CH, 'iPhone como Entrada',
+            tradeName + tradeImei,
+            { valSize: 8, valFont: 'Helvetica', bg: '#F0FDF4', labelColor: C.green });
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, '(–) Abatido',
+            tradeValue > 0 ? `– ${formatCurrency(tradeValue)}` : '—',
+            { valSize: 9, valColor: C.green, bg: '#F0FDF4', align: 'right' });
+          y += CH;
+        }
+
+        // --- Formas de pagamento em dinheiro/pix/cartão ---
+        cashMethods.forEach(m => {
+          const val      = parseBRL(pd[m]?.value);
+          const parcelas = pd[m]?.parcelas ? parseInt(pd[m].parcelas) : null;
+          const label    = PAY_LABELS_PDF[m] || m;
+          const suffix   = m === 'cartao_credito' && parcelas && parcelas > 1 ? ` (${parcelas}x)` : '';
+          cell(doc, ML,            y, CW * 0.72, CH, 'Forma de Pagamento', label + suffix, { valSize: 9 });
+          cell(doc, ML + CW * 0.72, y, CW * 0.28, CH, 'Valor Pago',
+            val > 0 ? formatCurrency(val) : '—',
+            { valSize: 9, align: 'right' });
+          y += CH;
+        });
+
+        // --- Total destacado ---
+        const fmtShort = [
+          ...cashMethods.map(m => PAY_LABELS_PDF[m] || m),
+          tradeValue > 0 ? 'iPhone como Entrada' : null,
+        ].filter(Boolean).join('  ·  ');
+        cell(doc, ML, y, CW * 0.72, CH, 'Formas de Pagamento', fmtShort || fmtPayments(orderData.payment_methods), { valSize: 9 });
+        strokeRect(doc, ML + CW * 0.72, y, CW * 0.28, CH, C.black, 1);
+        doc.save().fillColor(C.ink4).fontSize(6).font('Helvetica')
+          .text('VALOR TOTAL', ML + CW * 0.72, y + 3, { width: CW * 0.28, align: 'center', characterSpacing: 0.5 }).restore();
+        doc.save().fillColor(C.black).fontSize(13).font('Helvetica-Bold')
+          .text(formatCurrency(totalPrice), ML + CW * 0.72, y + 12, { width: CW * 0.28, align: 'center' }).restore();
+        y += CH;
+
+      } else {
+        // Fallback: formato antigo — ordens sem payment_details estruturado
+        cell(doc, ML, y, CW * 0.72, CH, 'Formas de Pagamento', fmtPayments(orderData.payment_methods), { valSize: 9 });
+        strokeRect(doc, ML + CW * 0.72, y, CW * 0.28, CH, C.black, 1);
+        doc.save().fillColor(C.ink4).fontSize(6).font('Helvetica')
+          .text('VALOR TOTAL', ML + CW * 0.72, y + 3, { width: CW * 0.28, align: 'center', characterSpacing: 0.5 }).restore();
+        doc.save().fillColor(C.black).fontSize(13).font('Helvetica-Bold')
+          .text(formatCurrency(orderData.price), ML + CW * 0.72, y + 12, { width: CW * 0.28, align: 'center' }).restore();
+        y += CH;
+      }
 
       // ── 8. GARANTIA ────────────────────────────────────────
       y = sectionLabel(doc, 'Termo de Garantia', y + 8);

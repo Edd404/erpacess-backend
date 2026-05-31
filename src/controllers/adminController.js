@@ -168,52 +168,68 @@ const listActiveModels = async (req, res) => {
   }
 };
 
-/** POST /admin/models — cria novo modelo */
+/** POST /admin/models — cria novo modelo (iphone | acessorio | outro) */
 const createModel = async (req, res) => {
   try {
-    const { name, series, year, capacities } = req.body;
+    const { name, category = 'iphone', series, year, capacities, suggested_price } = req.body;
 
-    if (!name || !series || !year) {
-      return res.status(400).json({ error: 'Nome, série e ano são obrigatórios.' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Nome e obrigatorio.' });
     }
-    if (!Array.isArray(capacities) || capacities.length === 0) {
-      return res.status(400).json({ error: 'Selecione ao menos uma capacidade.' });
+
+    const isIphone = category === 'iphone';
+
+    if (isIphone) {
+      if (!series || !series.trim()) {
+        return res.status(400).json({ error: 'Serie e obrigatoria para iPhones.' });
+      }
+      if (!Array.isArray(capacities) || capacities.length === 0) {
+        return res.status(400).json({ error: 'Selecione ao menos uma capacidade.' });
+      }
     }
 
     const exists = await query(
       'SELECT id FROM iphone_models WHERE LOWER(name) = LOWER($1)', [name.trim()]
     );
     if (exists.rows.length) {
-      return res.status(409).json({ error: 'Modelo já cadastrado.' });
+      return res.status(409).json({ error: 'Item ja cadastrado com esse nome.' });
     }
 
     const result = await query(
-      `INSERT INTO iphone_models (name, series, year, capacities)
-       VALUES ($1, $2, $3, $4)
-       RETURNING id, name, series, year, capacities, is_active, created_at`,
-      [name.trim(), series.trim(), parseInt(year), capacities]
+      `INSERT INTO iphone_models (name, category, series, year, capacities, suggested_price)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, name, category, series, year, capacities, suggested_price, is_active, created_at`,
+      [
+        name.trim(),
+        category,
+        isIphone && series ? series.trim() : null,
+        isIphone && year ? parseInt(year) : null,
+        isIphone ? (capacities || []) : [],
+        suggested_price ? parseFloat(String(suggested_price).replace(',', '.')) : null,
+      ]
     );
 
-    logger.info(`Modelo criado: ${name} por ${req.user.id}`);
-    res.status(201).json({ message: 'Modelo criado com sucesso.', data: result.rows[0] });
+    logger.info('Modelo criado: ' + name + ' (' + category + ') por ' + req.user.id);
+    res.status(201).json({ message: 'Item criado com sucesso.', data: result.rows[0] });
   } catch (err) {
     logger.error('Erro ao criar modelo:', err);
-    res.status(500).json({ error: 'Erro ao criar modelo.' });
+    res.status(500).json({ error: 'Erro ao criar item no catalogo.' });
   }
 };
 
 /** PATCH /admin/models/:id — edita modelo */
 const updateModel = async (req, res) => {
   try {
-    const { name, series, year, capacities, is_active } = req.body;
+    const { name, series, year, capacities, suggested_price, is_active } = req.body;
 
     const fields = [], values = [];
     let p = 1;
-    if (name       !== undefined) { fields.push(`name = $${p++}`);       values.push(name.trim()); }
-    if (series     !== undefined) { fields.push(`series = $${p++}`);     values.push(series.trim()); }
-    if (year       !== undefined) { fields.push(`year = $${p++}`);       values.push(parseInt(year)); }
-    if (capacities !== undefined) { fields.push(`capacities = $${p++}`); values.push(capacities); }
-    if (is_active  !== undefined) { fields.push(`is_active = $${p++}`);  values.push(is_active); }
+    if (name            !== undefined) { fields.push(`name = $${p++}`);            values.push(name.trim()); }
+    if (series          !== undefined) { fields.push(`series = $${p++}`);          values.push(series ? series.trim() : null); }
+    if (year            !== undefined) { fields.push(`year = $${p++}`);            values.push(year ? parseInt(year) : null); }
+    if (capacities      !== undefined) { fields.push(`capacities = $${p++}`);      values.push(capacities); }
+    if (suggested_price !== undefined) { fields.push(`suggested_price = $${p++}`); values.push(suggested_price ? parseFloat(String(suggested_price).replace(',','.')) : null); }
+    if (is_active       !== undefined) { fields.push(`is_active = $${p++}`);       values.push(is_active); }
 
     if (!fields.length) return res.status(400).json({ error: 'Nenhum campo para atualizar.' });
 
@@ -223,13 +239,13 @@ const updateModel = async (req, res) => {
     const result = await query(
       `UPDATE iphone_models SET ${fields.join(', ')}
        WHERE id = $${p}
-       RETURNING id, name, series, year, capacities, is_active`,
+       RETURNING id, name, category, series, year, capacities, suggested_price, is_active`,
       values
     );
 
-    if (!result.rows[0]) return res.status(404).json({ error: 'Modelo não encontrado.' });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Modelo nao encontrado.' });
 
-    logger.info(`Modelo ${req.params.id} atualizado por ${req.user.id}`);
+    logger.info('Modelo ' + req.params.id + ' atualizado por ' + req.user.id);
     res.json({ message: 'Modelo atualizado.', data: result.rows[0] });
   } catch (err) {
     logger.error('Erro ao atualizar modelo:', err);

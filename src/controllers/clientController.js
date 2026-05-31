@@ -105,7 +105,8 @@ const getClientHistory = async (req, res) => {
     // Todas as ordens
     const ordersRes = await query(
       `SELECT id, order_number, type, status, iphone_model, capacity, color,
-              imei, price, payment_methods, warranty_months, notes, condition_sale,
+              imei, price, payment_methods, payment_details, warranty_months, notes, condition_sale,
+              accessories,
               signed_document_url, signed_document_public_id, signed_document_at,
               created_at
        FROM service_orders

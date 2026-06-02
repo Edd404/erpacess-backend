@@ -156,7 +156,7 @@ const listModels = async (req, res) => {
 const listActiveModels = async (req, res) => {
   try {
     const result = await query(
-      `SELECT id, name, series, year, capacities
+      `SELECT id, name, category, series, year, capacities, suggested_price
        FROM iphone_models
        WHERE is_active = TRUE
        ORDER BY year DESC, name ASC`

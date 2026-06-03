@@ -80,8 +80,7 @@ const validateCreateClient = [
 
   body('email')
     .optional({ nullable: true, checkFalsy: true })
-    .isEmail().withMessage('E-mail inválido.')
-    .normalizeEmail(),
+    .isEmail().withMessage('E-mail inválido.'),
 
   body('cep')
     .optional({ nullable: true, checkFalsy: true })
@@ -114,8 +113,7 @@ const validateUpdateClient = [
     }),
   body('email')
     .optional({ nullable: true, checkFalsy: true })
-    .isEmail().withMessage('E-mail inválido.')
-    .normalizeEmail(),
+    .isEmail().withMessage('E-mail inválido.'),
   body('cep')
     .optional({ nullable: true, checkFalsy: true })
     .matches(/^\d{5}-?\d{3}$/).withMessage('CEP inválido.'),

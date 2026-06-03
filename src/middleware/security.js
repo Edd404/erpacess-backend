@@ -95,9 +95,11 @@ const xssSanitizer = (req, res, next) => {
 
     // Objetos normais
     const sanitized = {};
+    const EMAIL_FIELDS = ['email'];
     for (const [key, value] of Object.entries(obj)) {
       if (typeof value === 'string') {
-        sanitized[key] = xss(value, XSS_OPTIONS);
+        // Campos de email não passam pelo xss — o lib interpreta "user.name@" como tag incompleta
+        sanitized[key] = EMAIL_FIELDS.includes(key) ? value : xss(value, XSS_OPTIONS);
       } else if (typeof value === 'object' && value !== null) {
         sanitized[key] = sanitize(value);
       } else {

@@ -169,7 +169,7 @@ const validateCreateServiceOrder = [
   body('payment_methods')
     .isArray({ min: 1 }).withMessage('Selecione ao menos uma forma de pagamento.')
     .custom((methods) => {
-      const valid = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'iphone_entrada'];
+      const valid = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'iphone_entrada', 'troca'];
       const invalid = methods.filter((m) => !valid.includes(m));
       if (invalid.length) throw new Error(`Forma(s) de pagamento inválida(s): ${invalid.join(', ')}`);
       return true;
@@ -227,7 +227,7 @@ const validateUpdateServiceOrder = [
     .optional()
     .isArray({ min: 1 }).withMessage('Selecione ao menos uma forma de pagamento.')
     .custom((methods) => {
-      const valid = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'iphone_entrada'];
+      const valid = ['dinheiro', 'cartao_credito', 'cartao_debito', 'pix', 'iphone_entrada', 'troca'];
       const invalid = methods.filter((m) => !valid.includes(m));
       if (invalid.length) throw new Error(`Forma(s) de pagamento inválida(s): ${invalid.join(', ')}`);
       return true;

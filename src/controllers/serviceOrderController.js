@@ -308,8 +308,25 @@ const downloadWarrantyPDF = async (req, res) => {
  */
 const getStats = async (req, res) => {
   try {
-    const { period = '30' } = req.query;
-    const days = parseInt(period);
+    const { period = '30', date_from, date_to } = req.query;
+
+    // Monta o filtro de data — pode ser por intervalo explícito ou por "últimos N dias"
+    let dateFilter, prevDateFilter, periodDays;
+    let dateFilterSO; // versão com prefixo "so." para queries com JOIN
+    if (date_from) {
+      // Modo intervalo/mês — sem comparação com período anterior
+      dateFilter     = `created_at >= '${date_from}' AND created_at <= '${date_to || date_from}'::date + INTERVAL '1 day' - INTERVAL '1 second'`;
+      dateFilterSO   = `so.created_at >= '${date_from}' AND so.created_at <= '${date_to || date_from}'::date + INTERVAL '1 day' - INTERVAL '1 second'`;
+      prevDateFilter = null; // sem período anterior para comparação
+      periodDays     = null;
+    } else {
+      periodDays     = parseInt(period) || 30;
+      dateFilter     = `created_at >= NOW() - INTERVAL '${periodDays} days'`;
+      dateFilterSO   = `so.created_at >= NOW() - INTERVAL '${periodDays} days'`;
+      prevDateFilter = `created_at >= NOW() - INTERVAL '${periodDays * 2} days' AND created_at < NOW() - INTERVAL '${periodDays} days'`;
+    }
+
+    const days = periodDays; // mantém compatibilidade com código abaixo
 
     const [totals, prevTotals, byType, byStatus, recentRevenue, topModels, byLeadSource, leadSourceOrders] = await Promise.all([
       query(`
@@ -329,26 +346,26 @@ const getStats = async (req, res) => {
           COALESCE(AVG(price) FILTER (WHERE condition_sale = 'lacrado'),  0)    as avg_lacrado,
           COALESCE(AVG(price) FILTER (WHERE condition_sale = 'seminovo'), 0)    as avg_seminovo
         FROM service_orders
-        WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
+        WHERE deleted_at IS NULL AND ${dateFilter}
       `),
-      // Período anterior para comparação de tendência
-      query(`
-        SELECT
-          COUNT(*) as total_orders,
-          COUNT(*) FILTER (WHERE type = 'venda') as total_sales,
-          COUNT(*) FILTER (WHERE type = 'manutencao') as total_maintenance,
-          COALESCE(SUM(price), 0) as total_revenue,
-          COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0) as avg_sale_price,
-          COUNT(DISTINCT client_id) as unique_clients
-        FROM service_orders
-        WHERE deleted_at IS NULL
-          AND created_at >= NOW() - INTERVAL '${days * 2} days'
-          AND created_at <  NOW() - INTERVAL '${days} days'
-      `),
+      // Período anterior para comparação de tendência (apenas no modo "últimos N dias")
+      prevDateFilter
+        ? query(`
+            SELECT
+              COUNT(*) as total_orders,
+              COUNT(*) FILTER (WHERE type = 'venda') as total_sales,
+              COUNT(*) FILTER (WHERE type = 'manutencao') as total_maintenance,
+              COALESCE(SUM(price), 0) as total_revenue,
+              COALESCE(AVG(price) FILTER (WHERE type = 'venda'), 0) as avg_sale_price,
+              COUNT(DISTINCT client_id) as unique_clients
+            FROM service_orders
+            WHERE deleted_at IS NULL AND ${prevDateFilter}
+          `)
+        : Promise.resolve({ rows: [{ total_orders:0, total_sales:0, total_maintenance:0, total_revenue:0, avg_sale_price:0, unique_clients:0 }] }),
       query(`
         SELECT type, COUNT(*) as count, COALESCE(SUM(price), 0) as revenue
         FROM service_orders
-        WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
+        WHERE deleted_at IS NULL AND ${dateFilter}
         GROUP BY type
       `),
       query(`
@@ -359,13 +376,13 @@ const getStats = async (req, res) => {
         SELECT DATE_TRUNC('day', created_at) as day,
                COALESCE(SUM(price), 0) as revenue, COUNT(*) as orders
         FROM service_orders
-        WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
+        WHERE deleted_at IS NULL AND ${dateFilter}
         GROUP BY DATE_TRUNC('day', created_at) ORDER BY day ASC
       `),
       query(`
         SELECT iphone_model, COUNT(*) as count, COALESCE(SUM(price), 0) as revenue
         FROM service_orders
-        WHERE deleted_at IS NULL AND created_at >= NOW() - INTERVAL '${days} days'
+        WHERE deleted_at IS NULL AND ${dateFilter}
         GROUP BY iphone_model ORDER BY count DESC LIMIT 5
       `),
       // Origem dos clientes (extraída das notes)
@@ -381,7 +398,7 @@ const getStats = async (req, res) => {
           COALESCE(SUM(price), 0) as receita
         FROM service_orders
         WHERE deleted_at IS NULL
-          AND created_at >= NOW() - INTERVAL '${days} days'
+          AND ${dateFilter}
           AND type = 'venda'
         GROUP BY origem
         ORDER BY total DESC
@@ -400,7 +417,7 @@ const getStats = async (req, res) => {
         FROM service_orders so
         JOIN clients c ON c.id = so.client_id
         WHERE so.deleted_at IS NULL
-          AND so.created_at >= NOW() - INTERVAL '${days} days'
+          AND ${dateFilterSO}
           AND so.type = 'venda'
         ORDER BY so.created_at DESC
       `),

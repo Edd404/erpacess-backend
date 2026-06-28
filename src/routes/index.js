@@ -1,8 +1,9 @@
 const { Router } = require('express');
-const authController   = require('../controllers/authController');
-const clientController = require('../controllers/clientController');
-const orderController  = require('../controllers/serviceOrderController');
-const adminController  = require('../controllers/adminController');
+const authController      = require('../controllers/authController');
+const clientController    = require('../controllers/clientController');
+const orderController     = require('../controllers/serviceOrderController');
+const adminController     = require('../controllers/adminController');
+const inventoryController = require('../controllers/inventoryController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter }  = require('../middleware/security');
 const {
@@ -84,6 +85,12 @@ const modelsRouter = Router();
 modelsRouter.use(authenticate);
 modelsRouter.get('/active', adminController.listActiveModels);
 
+// ── INVENTORY (resumo público p/ autenticados; CRUD admin) ───
+const inventoryPublicRouter = Router();
+inventoryPublicRouter.use(authenticate);
+inventoryPublicRouter.get('/summary',    inventoryController.getInventorySummary);
+inventoryPublicRouter.get('/by-model',   inventoryController.getInventoryByModel);
+
 // ── ADMIN ─────────────────────────────────────────────────────
 const adminRouter = Router();
 adminRouter.use(authenticate, authorize('admin'));
@@ -97,6 +104,13 @@ adminRouter.get('/models',                  adminController.listModels);
 adminRouter.get('/models/active',           adminController.listActiveModels);
 adminRouter.post('/models',                 adminController.createModel);
 adminRouter.patch('/models/:id',            adminController.updateModel);
+
+// Estoque
+adminRouter.get('/inventory',              inventoryController.listInventory);
+adminRouter.post('/inventory',             inventoryController.createInventoryItem);
+adminRouter.post('/inventory/import',      inventoryController.importFromWhatsApp);
+adminRouter.patch('/inventory/:id',        inventoryController.updateInventoryItem);
+adminRouter.delete('/inventory/:id',       inventoryController.deleteInventoryItem);
 
 
 
@@ -144,10 +158,11 @@ adminRouter.post('/backup/run', async (req, res) => {
 });
 
 // ── MONTA ─────────────────────────────────────────────────────
-router.use('/auth',    authRouter);
-router.use('/clients', clientRouter);
-router.use('/orders',  orderRouter);
-router.use('/models',  modelsRouter);
-router.use('/admin',   adminRouter);
+router.use('/auth',      authRouter);
+router.use('/clients',   clientRouter);
+router.use('/orders',    orderRouter);
+router.use('/models',    modelsRouter);
+router.use('/inventory', inventoryPublicRouter);
+router.use('/admin',     adminRouter);
 
 module.exports = router;

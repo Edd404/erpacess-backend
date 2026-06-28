@@ -165,6 +165,58 @@ const createOrder = async (req, res) => {
           JSON.stringify(payment_details || {}),
         ]
       );
+
+      // ── Subtrai estoque ao vender ───────────────────────────────
+      // Só subtrai para ordens do tipo "venda"
+      if (type === 'venda') {
+        // Busca o item de estoque mais aderente:
+        // 1. modelo ILIKE (correspondência parcial tolerante a espaços)
+        // 2. capacidade ILIKE (se informada)
+        // 3. cor ILIKE (se informada — opcional, melhor esforço)
+        // 4. quantity > 0
+        // Prioridade: menor battery_health primeiro (gira o mais usado antes)
+        const stockMatch = await client_tx.query(
+          `SELECT id, quantity FROM inventory
+           WHERE quantity > 0
+             AND model_name ILIKE $1
+             AND ($2::text IS NULL OR capacity ILIKE $2)
+           ORDER BY
+             CASE WHEN $3::text IS NOT NULL AND color ILIKE $3 THEN 0 ELSE 1 END ASC,
+             battery_health ASC NULLS LAST
+           LIMIT 1
+           FOR UPDATE`,
+          [
+            `%${iphone_model.trim()}%`,
+            capacity || null,
+            color?.trim() || null,
+          ]
+        );
+
+        if (stockMatch.rows[0]) {
+          const { id: stockId, quantity: currentQty } = stockMatch.rows[0];
+          const newQty = currentQty - 1;
+
+          if (newQty <= 0) {
+            // Zera — mantém o registro para histórico (não deleta)
+            await client_tx.query(
+              `UPDATE inventory SET quantity = 0, updated_at = NOW() WHERE id = $1`,
+              [stockId]
+            );
+          } else {
+            await client_tx.query(
+              `UPDATE inventory SET quantity = $1, updated_at = NOW() WHERE id = $2`,
+              [newQty, stockId]
+            );
+          }
+
+          logger.info(`Estoque ${stockId} decrementado (${currentQty} → ${newQty}) para OS ${orderNumber}`);
+        } else {
+          // Não encontrou estoque correspondente — loga mas não bloqueia a venda
+          logger.warn(`Nenhum item de estoque encontrado para "${iphone_model}" ${capacity || ''} ao criar OS ${orderNumber}`);
+        }
+      }
+      // ────────────────────────────────────────────────────────────
+
       return result.rows[0];
     });
 

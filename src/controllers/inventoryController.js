@@ -17,7 +17,8 @@ const logger = require('../utils/logger');
  *     "16 Pro 128gb" → "iPhone 16 Pro" (capacity extraída separadamente)
  */
 function normalizeModelName(raw) {
-  let s = raw.trim();
+  // Remove caracteres invisíveis que o WhatsApp injeta (U+2060, U+FEFF, U+200B, U+200C, U+200D)
+  let s = raw.replace(/[\u2060\uFEFF\u200B\u200C\u200D\u00AD]/g, '').trim();
   s = s.replace(/\s+\d+(gb|tb)/gi, '').trim();
   s = s.replace(/promax/gi, 'Pro Max');
   s = s.replace(/pro\s*max/gi, 'Pro Max');
@@ -53,6 +54,9 @@ function normalizeColor(c) {
  */
 function parseWhatsAppStock(text) {
   if (!text || typeof text !== 'string') return [];
+
+  // Remove caracteres invisíveis do WhatsApp antes de qualquer processamento
+  text = text.replace(/[\u2060\uFEFF\u200B\u200C\u200D\u00AD]/g, '');
 
   const results = [];
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);

@@ -18,236 +18,135 @@ const logger = require('../utils/logger');
  */
 function normalizeModelName(raw) {
   let s = raw.trim();
-
-  // Remove capacidade do nome (ex: "13 Pro 128gb" → "13 Pro")
   s = s.replace(/\s+\d+(gb|tb)/gi, '').trim();
-
-  // Normaliza ProMax → Pro Max, ProMax → Pro Max
   s = s.replace(/promax/gi, 'Pro Max');
   s = s.replace(/pro\s*max/gi, 'Pro Max');
   s = s.replace(/plus/gi, 'Plus');
   s = s.replace(/mini/gi, 'mini');
   s = s.replace(/ultra/gi, 'Ultra');
-
-  // Garante que começa com "iPhone "
-  if (!/^iphone\s/i.test(s)) {
-    s = 'iPhone ' + s;
-  }
-
-  // Capitalização consistente: iPhone \d+ Pro Max
+  if (!/^iphone\s/i.test(s)) s = 'iPhone ' + s;
   s = s.replace(/iphone/i, 'iPhone');
-
   return s.trim();
 }
 
-/**
- * Extrai a capacidade de uma string, ex: "128gb" → "128GB"
- */
 function extractCapacity(raw) {
   const m = raw.match(/(\d+)\s*(gb|tb)/i);
   if (!m) return '';
-  const val = parseInt(m[1]);
-  const unit = m[2].toUpperCase();
-  return val + unit;
+  return parseInt(m[1]) + m[2].toUpperCase();
 }
 
-/**
- * Capitaliza a primeira letra de cada palavra da cor
- * "preto" → "Preto", "gold" → "Gold"
- */
 function normalizeColor(c) {
   if (!c) return '';
-  return c.trim()
-    .toLowerCase()
-    .replace(/(?:^|\s)\S/g, l => l.toUpperCase());
+  return c.trim().toLowerCase().replace(/(?:^|\s)\S/g, l => l.toUpperCase());
 }
 
 /**
- * Parser principal do texto recebido via WhatsApp.
+ * Parser principal do texto do WhatsApp.
  *
- * Formato suportado (linha por modelo):
+ * Formatos suportados:
  *   "13 128gb - 6 azul 95% // 1 verde 95%"
- *   "13ProMax 256gb - 1 Azul 95% *$3.200*"
- *
- * Seminovos (bloco "Seminovo"):
- *   "* 12 64gb lilás 95% (marcas de uso) $1.249,00"
- *
- * Retorna array de objetos prontos para INSERT/UPSERT.
+ *   "13 Pro 128gb - 2 gold 95 %"           ← espaço antes do %
+ *   "14 ProMax 128gb - 7 preto 4x90%, 3x95%"
+ *   "16 ProMax 256gb - 2 Preto 92%, 96% (nota livre)"
+ *   "17Pro 256gb - 1 Branco 100% *$6.650*"
+ *   Seminovos: "* 12 64gb lilás 95% (marcas de uso) $1.249,00"
  */
 function parseWhatsAppStock(text) {
   if (!text || typeof text !== 'string') return [];
 
   const results = [];
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
   let inSeminovo = false;
 
   for (const line of lines) {
-    // Detecta cabeçalho de bloco Seminovo
-    if (/^seminov/i.test(line.replace(/[\*\-\s]/g, ''))) {
-      inSeminovo = true;
-      continue;
-    }
-
-    // Ignora cabeçalhos e linhas vazias
+    if (/^seminov/i.test(line.replace(/[\*\-\s]/g, ''))) { inSeminovo = true; continue; }
     if (/^ESTOQUE/i.test(line) || line.startsWith('—') || line.startsWith('--')) continue;
 
-    // ── Parsing de linha Seminovo ──────────────────────────
+    // ── Seminovo ──────────────────────────────────────────────
     if (inSeminovo && (line.startsWith('*') || line.startsWith('-'))) {
-      // Ex: "* 12 64gb lilás 95% (marcas de uso) $1.249,00"
       const sem = line.replace(/^[\*\-\s]+/, '').trim();
-
-      // Extrai preço override: $1.249,00 ou R$1.249,00
       let priceOverride = null;
       const priceM = sem.match(/\$\s*([\d\.,]+)/);
-      if (priceM) {
-        const raw = priceM[1].replace(/\./g, '').replace(',', '.');
-        priceOverride = parseFloat(raw) || null;
-      }
-
-      // Extrai nota entre parênteses
+      if (priceM) priceOverride = parseFloat(priceM[1].replace(/\./g, '').replace(',', '.')) || null;
       let notes = null;
       const noteM = sem.match(/\(([^)]+)\)/);
       if (noteM) notes = noteM[1].trim();
-
-      // Extrai modelo e capacidade
-      // Ex: "12 64gb lilás 95%"
-      const modelCapM = sem.match(/^(\S+(?:\s+\S+)*?)\s+(\d+\s*(?:gb|tb))\s+(.+?)(?:\s+\d+%)?(?:\s*\(|$|\s*\$)/i);
+      const modelCapM = sem.match(/^(\S+(?:\s+\S+)*?)\s+(\d+\s*(?:gb|tb))\s+(.+?)(?:\s+\d+\s*%)?(?:\s*\(|$|\s*\$)/i);
       if (modelCapM) {
-        const modelRaw   = modelCapM[1];
-        const capRaw     = modelCapM[2];
-        const afterCap   = modelCapM[3] || '';
-
-        // Cor e bateria no que sobra
-        const colorBatM = afterCap.match(/^([a-záàâãéèêíóôõúüç\s]+?)\s+(\d+)%/i);
+        const afterCap  = modelCapM[3] || '';
+        const colorBatM = afterCap.match(/^(.+?)\s+(\d+)\s*%/i);
         let color = '', battery = null;
-        if (colorBatM) {
-          color   = normalizeColor(colorBatM[1]);
-          battery = parseInt(colorBatM[2]);
-        } else {
-          color = normalizeColor(afterCap.split(' ')[0]);
-        }
-
+        if (colorBatM) { color = normalizeColor(colorBatM[1]); battery = parseInt(colorBatM[2]); }
+        else { color = normalizeColor(afterCap.split(' ')[0]); }
         results.push({
-          model_name:     normalizeModelName(modelRaw),
-          capacity:       extractCapacity(capRaw),
-          color,
-          quantity:       1,
-          battery_health: battery,
-          condition:      'seminovo',
-          price_override: priceOverride,
-          notes,
+          model_name: normalizeModelName(modelCapM[1]), capacity: extractCapacity(modelCapM[2]),
+          color, quantity: 1, battery_health: battery,
+          condition: 'seminovo', price_override: priceOverride, notes,
         });
       }
       continue;
     }
 
-    // ── Parsing de linha Lacrado / Normal ─────────────────
-    // Ex: "13 128gb - 6 azul 95% // 1 verde 95% // 5 preto 90%, 5x95%"
-    // Separa em: [modelPart] - [colorBlocks]
-    const dashIdx = line.indexOf(' - ');
-    const dashIdx2 = line.indexOf(' – '); // travessão
-    const sepIdx = dashIdx >= 0 ? dashIdx : dashIdx2;
+    // ── Lacrado ───────────────────────────────────────────────
+    const dashIdx  = line.indexOf(' - ');
+    const dashIdx2 = line.indexOf(' \u2013 ');
+    const sepIdx   = dashIdx >= 0 ? dashIdx : dashIdx2;
     if (sepIdx < 0) continue;
 
-    const modelPart  = line.substring(0, sepIdx).trim();
-    const colorsPart = line.substring(sepIdx + 3).trim();
+    const modelPart = line.substring(0, sepIdx).trim();
+    let colorsPart  = line.substring(sepIdx + 3).trim();
 
-    // Remove preço final (*$3.200* ou *R$3.200*)
-    const cleanColorsPart = colorsPart.replace(/\*?\$[\d\.,]+\*?/g, '').trim();
+    // Remove preços e observações entre parênteses
+    colorsPart = colorsPart
+      .replace(/\*?\$[\d\.,]+\*?/g, '')
+      .replace(/\*?R\$[\d\.,]+\*?/g, '')
+      .replace(/\*[\d\.,]+\*/g, '')
+      .replace(/\([^)]*\)/g, '')
+      .trim();
 
-    // Extrai modelo + capacidade
     const capInModel = extractCapacity(modelPart);
-    const modelRaw   = modelPart.replace(/\s*\d+\s*(?:gb|tb)/gi, '').trim();
-    const modelName  = normalizeModelName(modelRaw);
-
-    // Divide pelos separadores de variante: " // "
-    const variants = cleanColorsPart.split(/\s*\/\/\s*/);
+    const modelName  = normalizeModelName(modelPart.replace(/\s*\d+\s*(?:gb|tb)/gi, '').trim());
+    const variants   = colorsPart.split(/\s*\/\/\s*/);
 
     for (const variant of variants) {
-      if (!variant.trim()) continue;
+      const v = variant.trim();
+      if (!v) continue;
 
-      // Cada variante: "6 azul 95%", "3 preto 90%, 95%", "5 preto 90%, 5x95%", "4 pretos 90%, 3x95%"
-      // Padrão geral: [quantidade] [cor] [baterias...]
-      // Pode ter múltiplas baterias separadas por vírgula: "90%, 95%"
-      // Ou "5 preto 90%, 5x95%" = 5 com 90% + 5 com 95%
+      // Extrai quantidade inicial
+      const qtyM = v.match(/^(\d+)\s+/);
+      if (!qtyM) continue;
+      const baseQty = parseInt(qtyM[1]);
+      const rest    = v.slice(qtyM[0].length).trim();
 
-      const variantTrimmed = variant.trim();
-
-      // Tenta o padrão complexo com quantidades múltiplas de baterias
-      // Ex: "5 preto 90%, 5x95%"
-      const complexM = variantTrimmed.match(/^(\d+)\s+([a-záàâãéèêíóôõúüç\s]+?)\s+(\d+%(?:\s*,\s*(?:\d+x)?\d+%)*)/i);
-
-      if (!complexM) {
-        // Fallback: tenta extração simples
-        const simpleM = variantTrimmed.match(/^(\d+)\s+([a-záàâãéèêíóôõúüç\s]+?)(?:\s+(\d+)%)?/i);
-        if (simpleM) {
-          const qty     = parseInt(simpleM[1]);
-          const color   = normalizeColor(simpleM[2]);
-          const battery = simpleM[3] ? parseInt(simpleM[3]) : null;
-
-          if (color && qty > 0) {
-            results.push({
-              model_name:     modelName,
-              capacity:       capInModel,
-              color,
-              quantity:       qty,
-              battery_health: battery,
-              condition:      'lacrado',
-              price_override: null,
-              notes:          null,
-            });
-          }
-        }
+      // Encontra onde começa a primeira bateria: "NxM%" ou "N %"
+      // Regex: posição do primeiro token de bateria
+      const batStartM = rest.match(/(?:\d+x)?\d+\s*%/);
+      if (!batStartM) {
+        // Sem bateria informada — insere com battery null
+        const color = normalizeColor(rest);
+        if (color) results.push({ model_name: modelName, capacity: capInModel, color, quantity: baseQty, battery_health: null, condition: 'lacrado', price_override: null, notes: null });
         continue;
       }
 
-      const baseQty   = parseInt(complexM[1]);
-      const color     = normalizeColor(complexM[2]);
-      const batteriesRaw = complexM[3]; // "90%, 5x95%" ou "90%, 95%"
+      const batStart    = rest.indexOf(batStartM[0]);
+      const color       = normalizeColor(rest.slice(0, batStart).trim());
+      if (!color) continue;
 
-      // Parseia as baterias: split por vírgula
-      const batParts = batteriesRaw.split(/\s*,\s*/);
+      const batteriesStr = rest.slice(batStart).trim();
+      const batParts     = batteriesStr.split(/\s*,\s*/);
 
-      for (const batPart of batParts) {
-        const batPartClean = batPart.trim();
-
-        // Padrão "5x95%": quantidade × bateria
-        const explicitM = batPartClean.match(/^(\d+)x(\d+)%$/i);
+      for (const bp of batParts) {
+        const bpClean = bp.trim();
+        // "NxM%"
+        const explicitM = bpClean.match(/^(\d+)x(\d+)\s*%$/i);
         if (explicitM) {
-          const qty     = parseInt(explicitM[1]);
-          const battery = parseInt(explicitM[2]);
-          if (color && qty > 0) {
-            results.push({
-              model_name:     modelName,
-              capacity:       capInModel,
-              color,
-              quantity:       qty,
-              battery_health: battery,
-              condition:      'lacrado',
-              price_override: null,
-              notes:          null,
-            });
-          }
+          results.push({ model_name: modelName, capacity: capInModel, color, quantity: parseInt(explicitM[1]), battery_health: parseInt(explicitM[2]), condition: 'lacrado', price_override: null, notes: null });
           continue;
         }
-
-        // Padrão simples "90%": aplica baseQty
-        const simpleBatM = batPartClean.match(/^(\d+)%$/);
+        // "N%" ou "N %"
+        const simpleBatM = bpClean.match(/^(\d+)\s*%$/);
         if (simpleBatM) {
-          const battery = parseInt(simpleBatM[1]);
-          if (color && baseQty > 0) {
-            results.push({
-              model_name:     modelName,
-              capacity:       capInModel,
-              color,
-              quantity:       baseQty,
-              battery_health: battery,
-              condition:      'lacrado',
-              price_override: null,
-              notes:          null,
-            });
-          }
+          results.push({ model_name: modelName, capacity: capInModel, color, quantity: baseQty, battery_health: parseInt(simpleBatM[1]), condition: 'lacrado', price_override: null, notes: null });
         }
       }
     }
@@ -255,6 +154,7 @@ function parseWhatsAppStock(text) {
 
   return results;
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // ENDPOINTS

@@ -51,6 +51,7 @@ const clientRouter = Router();
 clientRouter.use(authenticate);
 clientRouter.get('/',            validatePagination, clientController.listClients);
 clientRouter.get('/search',      validateSearch, clientController.searchClients);
+clientRouter.get('/export',      authorize('admin', 'gerente'), clientController.exportClients);
 clientRouter.get('/cep/:cep',    clientController.lookupCEP);
 clientRouter.get('/:id/history', clientController.getClientHistory);
 clientRouter.get('/:id',         clientController.getClient);

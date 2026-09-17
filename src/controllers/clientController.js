@@ -2,6 +2,7 @@ const { query } = require('../config/database');
 const { paginate, formatCPF } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
+const { buildClientsWorkbook } = require('../services/exportService');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const cleanCPF  = (v) => (v || '').replace(/\D/g, '');
@@ -50,6 +51,34 @@ const listClients = async (req, res) => {
   } catch (err) {
     logger.error('Erro ao listar clientes:', err);
     res.status(500).json({ error: 'Erro ao buscar clientes.' });
+  }
+};
+
+// ─── EXPORT (xlsx completo, sem paginação) ─────────────────────────────────────
+const exportClients = async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT c.id, c.name, c.cpf, c.phone, c.email,
+              c.cep, c.address, c.complement, c.neighborhood, c.city, c.state,
+              c.created_at,
+              COUNT(so.id) FILTER (WHERE so.deleted_at IS NULL) AS total_orders,
+              MAX(so.created_at) FILTER (WHERE so.deleted_at IS NULL) AS last_order_date
+       FROM clients c
+       LEFT JOIN service_orders so ON so.client_id = c.id
+       WHERE c.deleted_at IS NULL
+       GROUP BY c.id
+       ORDER BY c.name ASC`
+    );
+
+    const buffer = await buildClientsWorkbook(result.rows);
+    const filename = `clientes-acessphones-${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(Buffer.from(buffer));
+  } catch (err) {
+    logger.error('Erro ao exportar clientes:', err);
+    res.status(500).json({ error: 'Erro ao exportar clientes.' });
   }
 };
 
@@ -226,4 +255,4 @@ const lookupCEP = async (req, res) => {
   }
 };
 
-module.exports = { listClients, searchClients, getClient, getClientHistory, createClient, updateClient, deleteClient, lookupCEP };
+module.exports = { listClients, searchClients, exportClients, getClient, getClientHistory, createClient, updateClient, deleteClient, lookupCEP };

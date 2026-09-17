@@ -104,7 +104,8 @@ const getOrder = async (req, res) => {
               c.name as client_name, c.cpf as client_cpf,
               c.phone as client_phone, c.email as client_email,
               c.address as client_address, c.city as client_city,
-              c.state as client_state, c.neighborhood as client_neighborhood
+              c.state as client_state, c.neighborhood as client_neighborhood,
+              c.cep as client_cep
        FROM service_orders so
        JOIN clients c ON c.id = so.client_id
        WHERE so.id = $1 AND so.deleted_at IS NULL`,
@@ -130,7 +131,7 @@ const createOrder = async (req, res) => {
     } = req.body;
 
     const clientResult = await query(
-      'SELECT id, name, cpf, phone, email, address, city, state FROM clients WHERE id = $1 AND deleted_at IS NULL',
+      'SELECT id, name, cpf, phone, email, address, complement, neighborhood, cep, city, state FROM clients WHERE id = $1 AND deleted_at IS NULL',
       [client_id]
     );
     if (!clientResult.rows[0]) return res.status(404).json({ error: 'Cliente não encontrado.' });
@@ -224,7 +225,9 @@ const createOrder = async (req, res) => {
       ...orderData,
       client_name: client.name, client_cpf: client.cpf,
       client_phone: client.phone, client_email: client.email,
-      client_address: client.address, client_city: client.city, client_state: client.state,
+      client_address: client.address, client_complement: client.complement,
+      client_neighborhood: client.neighborhood, client_cep: client.cep,
+      client_city: client.city, client_state: client.state,
     };
 
     let pdfBuffer = null;
@@ -297,7 +300,9 @@ const resendPDF = async (req, res) => {
     const result = await query(
       `SELECT so.*, c.name as client_name, c.cpf as client_cpf,
               c.phone as client_phone, c.email as client_email,
-              c.address as client_address, c.city as client_city, c.state as client_state
+              c.address as client_address, c.complement as client_complement,
+              c.neighborhood as client_neighborhood, c.cep as client_cep,
+              c.city as client_city, c.state as client_state
        FROM service_orders so
        JOIN clients c ON c.id = so.client_id
        WHERE so.id = $1 AND so.deleted_at IS NULL`,
@@ -336,7 +341,9 @@ const downloadWarrantyPDF = async (req, res) => {
     const result = await query(
       `SELECT so.*, c.name as client_name, c.cpf as client_cpf,
               c.phone as client_phone, c.email as client_email,
-              c.address as client_address, c.city as client_city, c.state as client_state
+              c.address as client_address, c.complement as client_complement,
+              c.neighborhood as client_neighborhood, c.cep as client_cep,
+              c.city as client_city, c.state as client_state
        FROM service_orders so
        JOIN clients c ON c.id = so.client_id
        WHERE so.id = $1 AND so.deleted_at IS NULL`,

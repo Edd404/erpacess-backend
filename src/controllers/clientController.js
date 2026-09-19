@@ -3,6 +3,7 @@ const { paginate, formatCPF } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
 const { buildClientsWorkbook } = require('../services/exportService');
+const { ensureBairroGeocoded, getOrGeocodeBairro } = require('../services/geocodingService');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const cleanCPF  = (v) => (v || '').replace(/\D/g, '');
@@ -79,6 +80,144 @@ const exportClients = async (req, res) => {
   } catch (err) {
     logger.error('Erro ao exportar clientes:', err);
     res.status(500).json({ error: 'Erro ao exportar clientes.' });
+  }
+};
+
+// ─── GEO DISTRIBUTION (mapa de origem, agrupado por bairro) ────────────────────
+const geoDistribution = async (req, res) => {
+  try {
+    const { period, date_from, date_to } = req.query;
+
+    let dateCondition, params;
+    if (date_from) {
+      dateCondition = `so.created_at >= $1::date AND so.created_at < $2::date + INTERVAL '1 day'`;
+      params = [date_from, date_to || date_from];
+    } else {
+      const days = Math.min(Math.max(parseInt(period) || 30, 1), 3650);
+      dateCondition = `so.created_at >= NOW() - INTERVAL '${days} days'`;
+      params = [];
+    }
+
+    // Agrupa por bairro/cidade/estado: quantidade de clientes distintos,
+    // quantidade de ordens e receita, considerando só ordens dentro do período.
+    const result = await query(
+      `SELECT c.neighborhood, c.city, c.state,
+              COUNT(DISTINCT c.id) AS client_count,
+              COUNT(so.id) AS order_count,
+              COALESCE(SUM(so.price), 0) AS revenue
+       FROM service_orders so
+       JOIN clients c ON c.id = so.client_id
+       WHERE so.deleted_at IS NULL AND c.deleted_at IS NULL
+         AND ${dateCondition}
+         AND c.neighborhood IS NOT NULL AND c.neighborhood != ''
+         AND c.city IS NOT NULL AND c.city != ''
+         AND c.state IS NOT NULL AND c.state != ''
+       GROUP BY c.neighborhood, c.city, c.state
+       ORDER BY client_count DESC`,
+      params
+    );
+
+    // Clientes com ordem no período mas sem bairro/cidade/estado cadastrado —
+    // não entram no mapa, mas o total ajuda a dimensionar a lacuna de dados.
+    const semLocalizacao = await query(
+      `SELECT COUNT(DISTINCT c.id) AS total
+       FROM service_orders so
+       JOIN clients c ON c.id = so.client_id
+       WHERE so.deleted_at IS NULL AND c.deleted_at IS NULL
+         AND ${dateCondition}
+         AND (c.neighborhood IS NULL OR c.neighborhood = ''
+              OR c.city IS NULL OR c.city = ''
+              OR c.state IS NULL OR c.state = '')`,
+      params
+    );
+
+    // Busca as coordenadas já cacheadas para os bairros encontrados (leitura pura,
+    // sem chamar a API de geocodificação — isso mantém o endpoint sempre rápido).
+    const coordsResult = await query(
+      `SELECT neighborhood, city, state, latitude, longitude, geocode_failed
+       FROM bairro_coordinates`
+    );
+    const coordsMap = new Map(
+      coordsResult.rows.map(r => [`${r.neighborhood}|${r.city}|${r.state}`, r])
+    );
+
+    let semCoordenadas = 0;
+    const bairros = result.rows.reduce((acc, row) => {
+      const key = `${row.neighborhood}|${row.city}|${row.state}`;
+      const coord = coordsMap.get(key);
+      if (!coord || coord.geocode_failed || coord.latitude == null) {
+        semCoordenadas += parseInt(row.client_count);
+        return acc;
+      }
+      acc.push({
+        neighborhood: row.neighborhood,
+        city: row.city,
+        state: row.state,
+        latitude: parseFloat(coord.latitude),
+        longitude: parseFloat(coord.longitude),
+        client_count: parseInt(row.client_count),
+        order_count: parseInt(row.order_count),
+        revenue: parseFloat(row.revenue),
+      });
+      return acc;
+    }, []);
+
+    res.json({
+      data: {
+        bairros,
+        sem_localizacao: parseInt(semLocalizacao.rows[0].total),
+        sem_coordenadas: semCoordenadas,
+      },
+    });
+  } catch (err) {
+    logger.error('Erro ao buscar distribuição geográfica de clientes:', err);
+    res.status(500).json({ error: 'Erro ao buscar distribuição geográfica de clientes.' });
+  }
+};
+
+// ─── GEO BACKFILL (lote de bairros pendentes — dispara pelo próprio app, sem Shell) ──
+const GEO_BACKFILL_BATCH = 10;
+const GEO_BACKFILL_DELAY_MS = 1100; // Nominatim: máx. 1 req/segundo
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const PENDING_BAIRROS_SQL = `
+  SELECT DISTINCT c.neighborhood, c.city, c.state
+  FROM clients c
+  WHERE c.deleted_at IS NULL
+    AND c.neighborhood IS NOT NULL AND c.neighborhood != ''
+    AND c.city IS NOT NULL AND c.city != ''
+    AND c.state IS NOT NULL AND c.state != ''
+    AND NOT EXISTS (
+      SELECT 1 FROM bairro_coordinates bc
+      WHERE bc.neighborhood = c.neighborhood AND bc.city = c.city AND bc.state = c.state
+    )`;
+
+const geoBackfillBatch = async (req, res) => {
+  try {
+    const pending = await query(`${PENDING_BAIRROS_SQL} LIMIT $1`, [GEO_BACKFILL_BATCH]);
+
+    let geocoded = 0, failed = 0;
+    for (let i = 0; i < pending.rows.length; i++) {
+      const { neighborhood, city, state } = pending.rows[i];
+      const result = await getOrGeocodeBairro(neighborhood, city, state);
+      if (result) geocoded++; else failed++;
+      if (i < pending.rows.length - 1) await sleep(GEO_BACKFILL_DELAY_MS);
+    }
+
+    const remaining = await query(`SELECT COUNT(*) AS total FROM (${PENDING_BAIRROS_SQL}) t`);
+
+    res.json({
+      data: {
+        processed: pending.rows.length,
+        geocoded,
+        failed,
+        remaining: parseInt(remaining.rows[0].total),
+      },
+    });
+  } catch (err) {
+    logger.error('Erro no backfill de bairros:', err);
+    res.status(500).json({ error: 'Erro ao geocodificar bairros pendentes.' });
   }
 };
 
@@ -200,6 +339,7 @@ const createClient = async (req, res) => {
       [name, cleanCPF(cpf), cleanPhone(phone), email||null, cep||null, address||null, neighborhood||null, city||null, state||null]
     );
     const c = result.rows[0];
+    ensureBairroGeocoded(c.neighborhood, c.city, c.state);
     res.status(201).json({ data: { ...c, cpf_formatted: formatCPF(c.cpf) } });
   } catch (err) {
     logger.error('Erro ao criar cliente:', err);
@@ -222,6 +362,7 @@ const updateClient = async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Cliente não encontrado.' });
     const c = result.rows[0];
+    ensureBairroGeocoded(c.neighborhood, c.city, c.state);
     res.json({ data: { ...c, cpf_formatted: formatCPF(c.cpf) } });
   } catch (err) {
     logger.error('Erro ao atualizar cliente:', err);
@@ -255,4 +396,4 @@ const lookupCEP = async (req, res) => {
   }
 };
 
-module.exports = { listClients, searchClients, exportClients, getClient, getClientHistory, createClient, updateClient, deleteClient, lookupCEP };
+module.exports = { listClients, searchClients, exportClients, geoDistribution, geoBackfillBatch, getClient, getClientHistory, createClient, updateClient, deleteClient, lookupCEP };

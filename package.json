@@ -7,6 +7,7 @@
     "start": "node src/app.js",
     "dev": "nodemon src/app.js",
     "migrate": "node database/migrate.js",
+    "backfill:bairros": "node database/backfill-bairro-coordinates.js",
     "seed": "node database/seed.js",
     "test": "jest --coverage"
   },

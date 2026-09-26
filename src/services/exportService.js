@@ -20,6 +20,11 @@ const formatCEPValue = (cep) => {
   return c.length === 8 ? c.replace(/(\d{5})(\d{3})/, '$1-$2') : cep;
 };
 
+const formatLastModel = (c) => {
+  if (!c.last_model) return '';
+  return [c.last_model, c.last_capacity, c.last_color].filter(Boolean).join(' · ');
+};
+
 const isInactive = (c) => {
   if (parseInt(c.total_orders) === 0) return true;
   if (!c.last_order_date) return false;
@@ -27,21 +32,24 @@ const isInactive = (c) => {
   return days > 90;
 };
 
+// Cada coluna sabe seu próprio valor e formatação — evita índice mágico
+// (row.getCell(N)) espalhado pelo código, o que ficava frágil a cada nova coluna.
 const COLUMNS = [
-  { header: 'Nome',               key: 'name',            width: 32 },
-  { header: 'CPF',                key: 'cpf',             width: 16 },
-  { header: 'Telefone',           key: 'phone',           width: 17 },
-  { header: 'E-mail',             key: 'email',           width: 28 },
-  { header: 'CEP',                key: 'cep',             width: 12 },
-  { header: 'Endereço',           key: 'address',         width: 32 },
-  { header: 'Complemento',        key: 'complement',      width: 16 },
-  { header: 'Bairro',             key: 'neighborhood',    width: 20 },
-  { header: 'Cidade',             key: 'city',            width: 18 },
-  { header: 'UF',                 key: 'state',           width: 6  },
-  { header: 'Cliente desde',      key: 'created_at',      width: 14 },
-  { header: 'Atendimentos',       key: 'total_orders',    width: 13 },
-  { header: 'Último atendimento', key: 'last_order_date', width: 17 },
-  { header: 'Status',             key: 'status',          width: 12 },
+  { header: 'Nome',                   width: 32, align: 'left',   value: c => c.name },
+  { header: 'CPF',                    width: 16, align: 'left',   value: c => c.cpf ? formatCPF(c.cpf) : '' },
+  { header: 'Telefone',               width: 17, align: 'left',   value: c => c.phone ? formatPhone(c.phone) : '' },
+  { header: 'E-mail',                 width: 28, align: 'left',   value: c => c.email || '' },
+  { header: 'CEP',                    width: 12, align: 'left',   value: c => formatCEPValue(c.cep) },
+  { header: 'Endereço',               width: 32, align: 'left',   value: c => c.address || '' },
+  { header: 'Complemento',            width: 16, align: 'left',   value: c => c.complement || '' },
+  { header: 'Bairro',                 width: 20, align: 'left',   value: c => c.neighborhood || '' },
+  { header: 'Cidade',                 width: 18, align: 'left',   value: c => c.city || '' },
+  { header: 'UF',                     width: 6,  align: 'center', value: c => c.state || '' },
+  { header: 'Cliente desde',          width: 14, align: 'center', value: c => c.created_at ? new Date(c.created_at) : null, numFmt: 'dd/mm/yyyy' },
+  { header: 'Atendimentos',           width: 13, align: 'center', value: c => parseInt(c.total_orders) || 0 },
+  { header: 'Último atendimento',     width: 17, align: 'center', value: c => c.last_order_date ? new Date(c.last_order_date) : null, numFmt: 'dd/mm/yyyy' },
+  { header: 'Último modelo comprado', width: 26, align: 'left',   value: c => formatLastModel(c) },
+  { header: 'Status',                 width: 12, align: 'center', status: true }, // tratado à parte (tem cor própria)
 ];
 
 /**
@@ -59,7 +67,7 @@ const buildClientsWorkbook = async (clients) => {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1 },
   });
 
-  sheet.columns = COLUMNS.map(c => ({ key: c.key, width: c.width }));
+  sheet.columns = COLUMNS.map(c => ({ width: c.width }));
 
   // Linha 1 — título
   sheet.mergeCells(1, 1, 1, COLUMNS.length);
@@ -87,7 +95,7 @@ const buildClientsWorkbook = async (clients) => {
     cell.value = c.header;
     cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND.headerBg } };
-    cell.alignment = { vertical: 'middle', horizontal: i >= 10 ? 'center' : 'left' };
+    cell.alignment = { vertical: 'middle', horizontal: c.align };
   });
   headerRow.height = 20;
   sheet.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: COLUMNS.length } };
@@ -97,40 +105,23 @@ const buildClientsWorkbook = async (clients) => {
     const row = sheet.getRow(4 + idx);
     const inactive = isInactive(c);
 
-    row.getCell(1).value  = c.name;
-    row.getCell(2).value  = c.cpf ? formatCPF(c.cpf) : '';
-    row.getCell(3).value  = c.phone ? formatPhone(c.phone) : '';
-    row.getCell(4).value  = c.email || '';
-    row.getCell(5).value  = formatCEPValue(c.cep);
-    row.getCell(6).value  = c.address || '';
-    row.getCell(7).value  = c.complement || '';
-    row.getCell(8).value  = c.neighborhood || '';
-    row.getCell(9).value  = c.city || '';
-    row.getCell(10).value = c.state || '';
+    COLUMNS.forEach((col, i) => {
+      const cell = row.getCell(i + 1);
+      if (col.status) {
+        cell.value = inactive ? 'Inativo' : 'Ativo';
+        cell.alignment = { horizontal: 'center' };
+        cell.font = { bold: true, color: { argb: inactive ? BRAND.amber : BRAND.green } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: inactive ? BRAND.amberL : BRAND.greenL } };
+      } else {
+        cell.value = col.value(c);
+        cell.alignment = { horizontal: col.align };
+        if (col.numFmt) cell.numFmt = col.numFmt;
+      }
+    });
 
-    const createdCell = row.getCell(11);
-    createdCell.value = c.created_at ? new Date(c.created_at) : null;
-    createdCell.numFmt = 'dd/mm/yyyy';
-    createdCell.alignment = { horizontal: 'center' };
-
-    const ordersCell = row.getCell(12);
-    ordersCell.value = parseInt(c.total_orders) || 0;
-    ordersCell.alignment = { horizontal: 'center' };
-
-    const lastCell = row.getCell(13);
-    lastCell.value = c.last_order_date ? new Date(c.last_order_date) : null;
-    lastCell.numFmt = 'dd/mm/yyyy';
-    lastCell.alignment = { horizontal: 'center' };
-
-    const statusCell = row.getCell(14);
-    statusCell.value = inactive ? 'Inativo' : 'Ativo';
-    statusCell.alignment = { horizontal: 'center' };
-    statusCell.font = { bold: true, color: { argb: inactive ? BRAND.amber : BRAND.green } };
-    statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: inactive ? BRAND.amberL : BRAND.greenL } };
-
-    // zebra striping nas colunas 1–13 (a 14 já tem cor própria de status)
+    // zebra striping em todas as colunas exceto Status (que já tem cor própria)
     if (idx % 2 === 1) {
-      for (let col = 1; col <= 13; col++) {
+      for (let col = 1; col < COLUMNS.length; col++) {
         row.getCell(col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: BRAND.stripe } };
       }
     }

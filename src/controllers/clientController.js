@@ -3,7 +3,7 @@ const { paginate, formatCPF } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
 const { buildClientsWorkbook } = require('../services/exportService');
-const { ensureBairroGeocoded, getOrGeocodeBairro } = require('../services/geocodingService');
+const { ensureBairroGeocoded, getOrGeocodeBairro, geocodeAndCache } = require('../services/geocodingService');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const cleanCPF  = (v) => (v || '').replace(/\D/g, '');
@@ -63,9 +63,19 @@ const exportClients = async (req, res) => {
               c.cep, c.address, c.complement, c.neighborhood, c.city, c.state,
               c.created_at,
               COUNT(so.id) FILTER (WHERE so.deleted_at IS NULL) AS total_orders,
-              MAX(so.created_at) FILTER (WHERE so.deleted_at IS NULL) AS last_order_date
+              MAX(so.created_at) FILTER (WHERE so.deleted_at IS NULL) AS last_order_date,
+              MAX(last_purchase.iphone_model) AS last_model,
+              MAX(last_purchase.capacity) AS last_capacity,
+              MAX(last_purchase.color) AS last_color
        FROM clients c
        LEFT JOIN service_orders so ON so.client_id = c.id
+       LEFT JOIN LATERAL (
+         SELECT iphone_model, capacity, color
+         FROM service_orders so2
+         WHERE so2.client_id = c.id AND so2.type = 'venda' AND so2.deleted_at IS NULL
+         ORDER BY so2.created_at DESC
+         LIMIT 1
+       ) last_purchase ON true
        WHERE c.deleted_at IS NULL
        GROUP BY c.id
        ORDER BY c.name ASC`
@@ -89,7 +99,10 @@ const geoDistribution = async (req, res) => {
     const { period, date_from, date_to } = req.query;
 
     let dateCondition, params;
-    if (date_from) {
+    if (period === 'all') {
+      dateCondition = 'TRUE';
+      params = [];
+    } else if (date_from) {
       dateCondition = `so.created_at >= $1::date AND so.created_at < $2::date + INTERVAL '1 day'`;
       params = [date_from, date_to || date_from];
     } else {
@@ -181,17 +194,19 @@ const GEO_BACKFILL_DELAY_MS = 1100; // Nominatim: máx. 1 req/segundo
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// "Pendente" agora inclui tanto bairro nunca tentado quanto bairro que já
+// tentou e falhou — assim o botão retenta as falhas em vez de desistir delas
+// pra sempre, e "restantes" passa a bater com "aguardando geocodificação" do mapa.
 const PENDING_BAIRROS_SQL = `
   SELECT DISTINCT c.neighborhood, c.city, c.state
   FROM clients c
+  LEFT JOIN bairro_coordinates bc
+    ON bc.neighborhood = c.neighborhood AND bc.city = c.city AND bc.state = c.state
   WHERE c.deleted_at IS NULL
     AND c.neighborhood IS NOT NULL AND c.neighborhood != ''
     AND c.city IS NOT NULL AND c.city != ''
     AND c.state IS NOT NULL AND c.state != ''
-    AND NOT EXISTS (
-      SELECT 1 FROM bairro_coordinates bc
-      WHERE bc.neighborhood = c.neighborhood AND bc.city = c.city AND bc.state = c.state
-    )`;
+    AND (bc.id IS NULL OR bc.geocode_failed = true OR bc.latitude IS NULL)`;
 
 const geoBackfillBatch = async (req, res) => {
   try {
@@ -200,7 +215,7 @@ const geoBackfillBatch = async (req, res) => {
     let geocoded = 0, failed = 0;
     for (let i = 0; i < pending.rows.length; i++) {
       const { neighborhood, city, state } = pending.rows[i];
-      const result = await getOrGeocodeBairro(neighborhood, city, state);
+      const result = await geocodeAndCache(neighborhood, city, state);
       if (result) geocoded++; else failed++;
       if (i < pending.rows.length - 1) await sleep(GEO_BACKFILL_DELAY_MS);
     }

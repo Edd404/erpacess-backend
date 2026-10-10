@@ -18,7 +18,7 @@ const { deleteImage } = require('./cloudinaryService');
 
 // Formas de pagamento em que a loja RECEBE um aparelho do cliente → exigem documento.
 // (Para exigir só no iPhone de entrada, deixe apenas 'iphone_entrada'.)
-const DOC_REQUIRED_METHODS = ['iphone_entrada', 'troca'];
+const DOC_REQUIRED_METHODS = ['iphone_entrada'];
 
 const MAX_DOCS_PER_ORDER   = 3;    // ex.: frente + verso + CPF
 const PENDING_TTL_HOURS    = 24;   // validade de uma foto enviada e ainda não vinculada

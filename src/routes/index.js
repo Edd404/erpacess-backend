@@ -1,9 +1,12 @@
-const { Router } = require('express');
+const express = require('express');
+const { Router } = express;
+const rateLimit = require('express-rate-limit');
 const authController      = require('../controllers/authController');
 const clientController    = require('../controllers/clientController');
 const orderController     = require('../controllers/serviceOrderController');
 const adminController     = require('../controllers/adminController');
 const inventoryController = require('../controllers/inventoryController');
+const documentController  = require('../controllers/orderDocumentController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter }  = require('../middleware/security');
 const {
@@ -77,11 +80,39 @@ orderRouter.post('/',                validateCreateServiceOrder, orderController
 orderRouter.put('/:id',              validateUpdateServiceOrder, orderController.updateOrder);
 orderRouter.patch('/:id/status',     orderController.updateStatus);
 orderRouter.patch('/:id/resend-pdf', orderController.resendPDF);
+// ── Foto do documento do cliente (Cloudinary PRIVADO) ─────────
+orderRouter.get('/:id/documents',                 documentController.listOrderDocuments);
+orderRouter.post('/:id/documents',                documentController.attachDocuments);
+orderRouter.get('/:id/documents/:docId/file',     authorize('admin', 'gerente'), documentController.viewDocument);
+orderRouter.delete('/:id/documents/:docId',       authorize('admin'),            documentController.deleteOrderDocument);
 // ── Documento assinado (Cloudinary) ───────────────────────────
 orderRouter.patch('/:id/document',   orderController.saveDocument);
 orderRouter.delete('/:id/document',  orderController.removeDocument);
 // ─────────────────────────────────────────────────────────────
 orderRouter.delete('/:id',           authorize('admin'), orderController.deleteOrder);
+
+// ── ORDER-DOCUMENTS (upload da foto do documento do cliente) ───
+// Corpo = imagem binária (não é JSON/multipart). Limite de tamanho e de frequência próprios.
+const documentUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos envios de foto em pouco tempo. Aguarde alguns minutos.' },
+});
+const rawImageBody = [
+  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: documentController.MAX_UPLOAD_BYTES }),
+  (err, req, res, next) => {
+    if (err && err.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Foto muito grande (máximo 6 MB).', code: 'IMAGE_TOO_LARGE' });
+    }
+    return next(err);
+  },
+];
+const documentRouter = Router();
+documentRouter.use(authenticate);
+documentRouter.post('/',         documentUploadLimiter, ...rawImageBody, documentController.uploadDocument);
+documentRouter.delete('/:docId', documentController.deletePendingDocument);
 
 // ── MODELS (público para autenticados) ───────────────────────
 const modelsRouter = Router();
@@ -164,6 +195,7 @@ adminRouter.post('/backup/run', async (req, res) => {
 router.use('/auth',      authRouter);
 router.use('/clients',   clientRouter);
 router.use('/orders',    orderRouter);
+router.use('/order-documents', documentRouter);
 router.use('/models',    modelsRouter);
 router.use('/inventory', inventoryPublicRouter);
 router.use('/admin',     adminRouter);

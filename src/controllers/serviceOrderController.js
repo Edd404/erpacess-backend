@@ -4,6 +4,8 @@ const { sendWarrantyEmail } = require('../services/emailService');
 const { generateServiceOrderNumber, paginate } = require('../utils/helpers');
 const logger = require('../utils/logger');
 const { attachSignedDocumentUrl } = require('../services/cloudinaryService');
+const { auditLog } = require('../middleware/audit');
+const docs = require('../services/orderDocumentService');
 
 /**
  * GET /api/v1/orders
@@ -127,8 +129,15 @@ const createOrder = async (req, res) => {
     const {
       client_id, type, iphone_model, capacity, color,
       imei, price, warranty_months = 3, payment_methods, notes, condition_sale,
-      accessories = [], payment_details = {},
+      accessories = [], payment_details = {}, document_ids,
     } = req.body;
+
+    // ── Foto do documento do cliente (obrigatória com iPhone de entrada / troca) ──
+    const docIds = docs.normalizeDocIds(document_ids);
+    if (docs.requiresClientDocument(type, payment_methods) && docIds.length === 0) {
+      return res.status(422).json({ error: docs.MSG_REQUIRED, code: 'DOCUMENT_REQUIRED' });
+    }
+    if (docIds.length) await docs.assertPendingDocuments(docIds, req.user.id);
 
     const clientResult = await query(
       'SELECT id, name, cpf, phone, email, address, complement, neighborhood, cep, city, state FROM clients WHERE id = $1 AND deleted_at IS NULL',
@@ -166,6 +175,9 @@ const createOrder = async (req, res) => {
           JSON.stringify(payment_details || {}),
         ]
       );
+
+      // ── Vincula a foto do documento à ordem (mesma transação) ──────
+      if (docIds.length) await docs.attachPendingDocuments(client_tx, result.rows[0].id, docIds, req.user.id);
 
       // ── Subtrai estoque ao vender ───────────────────────────────
       // Só subtrai para ordens do tipo "venda"
@@ -248,6 +260,14 @@ const createOrder = async (req, res) => {
     }
 
     logger.info(`Ordem criada: ${orderData.order_number} por ${req.user.id}`);
+    if (docIds.length) {
+      auditLog({
+        userId: req.user.id, userName: req.user.name, userRole: req.user.role,
+        action: 'document.attach', entity: 'order_document',
+        entityId: docIds[0], entityLabel: orderData.order_number,
+        changes: { document_ids: docIds }, ipAddress: req.ip, userAgent: req.get('User-Agent'),
+      });
+    }
 
     const response = {
       message: 'Ordem de serviço criada com sucesso.',
@@ -259,6 +279,9 @@ const createOrder = async (req, res) => {
 
     res.status(201).json(response);
   } catch (error) {
+    if (error instanceof docs.DocumentError) {
+      return res.status(error.status).json({ error: error.message, code: error.code });
+    }
     logger.error('Erro ao criar ordem:', error);
     res.status(500).json({ error: 'Erro ao criar ordem de serviço.' });
   }
@@ -721,10 +744,20 @@ const updateOrder = async (req, res) => {
     } = req.body;
 
     const existing = await query(
-      'SELECT id, order_number FROM service_orders WHERE id = $1 AND deleted_at IS NULL',
+      'SELECT id, order_number, type, payment_methods FROM service_orders WHERE id = $1 AND deleted_at IS NULL',
       [req.params.id]
     );
     if (!existing.rows[0]) return res.status(404).json({ error: 'Ordem não encontrada.' });
+
+    // Só barra quando a edição PASSA a incluir iPhone de entrada/troca e a ordem não tem documento.
+    // (Ordens antigas que já tinham entrada continuam editáveis normalmente.)
+    if (payment_methods) {
+      const willRequire = docs.requiresClientDocument(type || existing.rows[0].type, payment_methods);
+      const hadRequire  = docs.requiresClientDocument(existing.rows[0].type, existing.rows[0].payment_methods);
+      if (willRequire && !hadRequire && (await docs.countAttachedDocuments(req.params.id)) === 0) {
+        return res.status(422).json({ error: docs.MSG_REQUIRED_ON_EDIT, code: 'DOCUMENT_REQUIRED' });
+      }
+    }
 
     const result = await query(
       `UPDATE service_orders SET

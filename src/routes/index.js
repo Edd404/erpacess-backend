@@ -7,6 +7,7 @@ const orderController     = require('../controllers/serviceOrderController');
 const adminController     = require('../controllers/adminController');
 const inventoryController = require('../controllers/inventoryController');
 const documentController  = require('../controllers/orderDocumentController');
+const upgradeController   = require('../controllers/upgradeSalesController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter }  = require('../middleware/security');
 const {
@@ -145,6 +146,10 @@ adminRouter.post('/inventory',             inventoryController.createInventoryIt
 adminRouter.post('/inventory/import',      inventoryController.importFromWhatsApp);
 adminRouter.patch('/inventory/:id',        inventoryController.updateInventoryItem);
 adminRouter.delete('/inventory/:id',       inventoryController.deleteInventoryItem);
+
+// Vendas com Upgrade (cliente entregou um aparelho: iPhone de entrada ou troca)
+adminRouter.get('/upgrades/summary',       upgradeController.getUpgradeSummary);
+adminRouter.get('/upgrades',               validatePagination, upgradeController.listUpgradeSales);
 
 
 

@@ -8,6 +8,7 @@ const adminController     = require('../controllers/adminController');
 const inventoryController = require('../controllers/inventoryController');
 const documentController  = require('../controllers/orderDocumentController');
 const upgradeController   = require('../controllers/upgradeSalesController');
+const invoiceController   = require('../controllers/orderInvoiceController');
 const { authenticate, authorize } = require('../middleware/auth');
 const { authLimiter }  = require('../middleware/security');
 const {
@@ -68,6 +69,32 @@ clientRouter.delete('/:id',      authorize('admin', 'gerente'), clientController
 // ── ORDERS ────────────────────────────────────────────────────
 const orderRouter = Router();
 orderRouter.use(authenticate);
+
+// ── Nota fiscal anexada à ordem (PDF / XML / imagem) ──────────
+// Corpo = arquivo binário (não é JSON/multipart). Limite de tamanho e de frequência próprios.
+const invoiceUploadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos arquivos enviados em pouco tempo. Aguarde alguns minutos.' },
+});
+const invoiceSendLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Muitos envios de nota fiscal em pouco tempo. Aguarde alguns minutos.' },
+});
+const rawInvoiceBody = [
+  express.raw({ type: invoiceController.ALLOWED_CONTENT_TYPES, limit: invoiceController.MAX_UPLOAD_BYTES }),
+  (err, req, res, next) => {
+    if (err && err.type === 'entity.too.large') {
+      return res.status(413).json({ error: 'Arquivo muito grande (máximo 5 MB por arquivo).', code: 'FILE_TOO_LARGE' });
+    }
+    return next(err);
+  },
+];
 // ⚠️ rotas estáticas ANTES de /:id
 orderRouter.get('/stats',            orderController.getStats);
 orderRouter.get('/search',           validateSearch, orderController.searchOrders);
@@ -86,6 +113,12 @@ orderRouter.get('/:id/documents',                 documentController.listOrderDo
 orderRouter.post('/:id/documents',                documentController.attachDocuments);
 orderRouter.get('/:id/documents/:docId/file',     authorize('admin', 'gerente'), documentController.viewDocument);
 orderRouter.delete('/:id/documents/:docId',       authorize('admin'),            documentController.deleteOrderDocument);
+// ── Nota fiscal da venda: anexar, enviar por e-mail ao cliente, abrir, excluir ──
+orderRouter.get('/:id/invoices',                  authorize('admin', 'gerente'), invoiceController.listInvoices);
+orderRouter.post('/:id/invoices',                 authorize('admin', 'gerente'), invoiceUploadLimiter, ...rawInvoiceBody, invoiceController.uploadInvoice);
+orderRouter.post('/:id/invoices/send',            authorize('admin', 'gerente'), invoiceSendLimiter, invoiceController.sendInvoices);
+orderRouter.get('/:id/invoices/:invoiceId/file',  authorize('admin', 'gerente'), invoiceController.viewInvoice);
+orderRouter.delete('/:id/invoices/:invoiceId',    authorize('admin'),            invoiceController.deleteInvoice);
 // ── Documento assinado (Cloudinary) ───────────────────────────
 orderRouter.patch('/:id/document',   orderController.saveDocument);
 orderRouter.delete('/:id/document',  orderController.removeDocument);

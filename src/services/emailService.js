@@ -215,4 +215,155 @@ const sendWarrantyEmail = async (orderData, pdfBuffer) => {
   }
 };
 
-module.exports = { sendWarrantyEmail, verifyEmailConnection };
+// ═══════════════════════════════════════════════════════════════
+// NOTA FISCAL — envia ao cliente os arquivos da nota anexados à ordem
+// ═══════════════════════════════════════════════════════════════
+const isEmailConfigured = () =>
+  Boolean(process.env.RESEND_API_KEY) && !process.env.RESEND_API_KEY.startsWith('re_xxx');
+
+// Tudo que vem do banco entra escapado no HTML do e-mail
+const esc = (v) => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const formatSize = (bytes) => {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1).replace('.', ',')} MB`;
+  return `${Math.max(1, Math.round(n / 1024))} KB`;
+};
+
+/**
+ * @param {object} p
+ * @param {object} p.order  { order_number, created_at, client_name, iphone_model, capacity, color }
+ * @param {string} p.to     e-mail do cliente (já validado pelo controller)
+ * @param {Array}  p.files  [{ filename, size_bytes, content: Buffer }]
+ * @returns {{ sent: boolean, messageId?: string, reason?: string }}
+ */
+const sendInvoiceEmail = async ({ order, to, files }) => {
+  if (!isEmailConfigured()) {
+    logger.warn('Resend não configurado. Pulando envio da nota fiscal.');
+    return { sent: false, reason: 'RESEND_API_KEY não configurada.' };
+  }
+
+  const firstName = esc((order.client_name || '').trim().split(' ')[0] || 'cliente');
+  const plural    = files.length > 1;
+  const product   = [order.iphone_model, order.capacity, order.color].filter(Boolean).join(' · ');
+
+  const fileRows = files.map((f) => `
+      <div class="row">
+        <span class="lbl file">📎 ${esc(f.filename)}</span>
+        <span class="val nowrap">${esc(formatSize(f.size_bytes))}</span>
+      </div>`).join('');
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nota Fiscal</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#F2F2F7;font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif;color:#1C1C1E;-webkit-font-smoothing:antialiased}
+  a{color:#0A66FF;text-decoration:none}
+  .wrap{max-width:560px;margin:32px auto;background:#FFFFFF;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.10)}
+  .hd{background:#0C0C0E;padding:28px 32px 24px}
+  .hd-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .hd-brand h1{color:#FFFFFF;font-size:19px;font-weight:700;letter-spacing:-.3px;line-height:1}
+  .hd-brand h1 span{color:rgba(255,255,255,0.32);font-weight:400}
+  .hd-brand p{color:#636366;font-size:11px;margin-top:4px}
+  .hd-badge{display:inline-flex;align-items:center;gap:5px;background:rgba(10,102,255,0.20);color:#60A5FA;padding:5px 12px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.3px;white-space:nowrap;flex-shrink:0}
+  .hd-rule{height:1px;background:rgba(255,255,255,0.07);margin:18px 0 14px}
+  .hd-os{color:rgba(255,255,255,0.28);font-size:11px;font-family:'Courier New',monospace;letter-spacing:.6px}
+  .bd{padding:32px 32px 24px}
+  .greeting{font-size:22px;font-weight:700;letter-spacing:-.4px;color:#0C0C0E;margin-bottom:8px}
+  .lead{color:#3A3A3C;font-size:14px;line-height:1.65;margin-bottom:28px}
+  .card{border-radius:12px;border:1px solid #E5E5EA;overflow:hidden;margin-bottom:14px}
+  .card-title{font-size:9px;font-weight:700;color:#8E8E93;text-transform:uppercase;letter-spacing:1.2px;padding:11px 16px;background:#F9F9FB;border-bottom:1px solid #E5E5EA}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid #F2F2F7}
+  .row:last-child{border-bottom:none}
+  .lbl{font-size:13px;color:#6C6C70}
+  .lbl.file{color:#0C0C0E;font-weight:600;word-break:break-all}
+  .val{font-size:13px;font-weight:600;color:#0C0C0E;text-align:right}
+  .nowrap{white-space:nowrap;flex-shrink:0}
+  .note{background:#FFFBEB;border-radius:10px;border:1px solid #FDE68A;padding:14px 16px;margin-top:14px}
+  .note p{font-size:12px;color:#92400E;line-height:1.65}
+  .ft{background:#F9F9FB;border-top:1px solid #E5E5EA;padding:22px 32px;text-align:center}
+  .ft-name{font-weight:700;color:#0C0C0E;font-size:13px;margin-bottom:6px}
+  .ft-info{color:#8E8E93;font-size:12px;line-height:1.7}
+  .ft-auto{color:#C7C7CC;font-size:10px;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hd">
+    <div class="hd-top">
+      <div class="hd-brand">
+        <h1>Acess<span>phones</span></h1>
+        <p>Especializada em iPhones</p>
+      </div>
+      <div class="hd-badge">✓ Nota Fiscal</div>
+    </div>
+    <div class="hd-rule"></div>
+    <div class="hd-os">${esc(order.order_number)}</div>
+  </div>
+
+  <div class="bd">
+    <p class="greeting">Olá, ${firstName}! 👋</p>
+    <p class="lead">${plural ? 'Seguem em anexo os arquivos da nota fiscal' : 'Segue em anexo a nota fiscal'} da sua compra na ${esc(COMPANY.name)}.</p>
+
+    <div class="card">
+      <div class="card-title">Referência da Compra</div>
+      <div class="row">
+        <span class="lbl">Nº Atendimento</span>
+        <span class="val">${esc(order.order_number)}</span>
+      </div>
+      <div class="row">
+        <span class="lbl">Data da compra</span>
+        <span class="val">${esc(formatDateBR(order.created_at))}</span>
+      </div>
+      ${product ? `
+      <div class="row">
+        <span class="lbl">Produto</span>
+        <span class="val">${esc(product)}</span>
+      </div>` : ''}
+    </div>
+
+    <div class="card">
+      <div class="card-title">${plural ? 'Arquivos Anexados' : 'Arquivo Anexado'}</div>${fileRows}
+    </div>
+
+    <div class="note">
+      <p>📎 <strong>${plural ? 'Guarde os arquivos' : 'Guarde o arquivo'} em local seguro.</strong> A nota fiscal pode ser exigida para garantia, troca ou declaração.</p>
+    </div>
+  </div>
+
+  <div class="ft">
+    <p class="ft-name">${esc(COMPANY.name)}</p>
+    <p class="ft-info">${esc(COMPANY.phone)} · <a href="mailto:${esc(COMPANY.email)}">${esc(COMPANY.email)}</a></p>
+    <p class="ft-auto">Este é um e-mail automático — por favor, não responda diretamente.</p>
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  try {
+    const result = await sendEmail({
+      to,
+      subject: `Nota Fiscal Nº ${order.order_number} — ${COMPANY.name}`,
+      html,
+      attachments: files.map((f) => ({
+        filename: f.filename,
+        content: Buffer.from(f.content).toString('base64'),
+      })),
+    });
+    logger.info(`Nota fiscal (${files.length} arquivo(s)) enviada para ${to}. ID: ${result.id}`);
+    return { sent: true, messageId: result.id };
+  } catch (error) {
+    logger.error(`Falha ao enviar nota fiscal para ${to}:`, error.message);
+    return { sent: false, reason: error.message };
+  }
+};
+
+module.exports = { sendWarrantyEmail, sendInvoiceEmail, isEmailConfigured, verifyEmailConnection };
